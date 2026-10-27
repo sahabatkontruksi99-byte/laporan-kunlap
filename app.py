@@ -25,8 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- INJEKSI CSS MODERN & MOBILE FRIENDLY -----------------
-# ----------------- INJEKSI CSS ADAPTIF (KOMPATIBEL DARK & LIGHT MODE) -----------------
+# ----------------- INJEKSI CSS MODERN & RESPONSIF -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -34,7 +33,6 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
-    /* Header Card */
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
         color: #FFFFFF !important;
@@ -56,7 +54,6 @@ st.markdown("""
         line-height: 1.4;
     }
 
-    /* Hilangkan background putih yang bikin belang di Dark Mode */
     .stFileUploader, .stSelectbox, .stDateInput, .stTextArea {
         background: transparent !important;
         padding: 0 !important;
@@ -64,7 +61,6 @@ st.markdown("""
         margin-bottom: 14px;
     }
 
-    /* Tombol Utama Lebar & Nyaman di Layar HP */
     .stButton > button {
         width: 100%;
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
@@ -76,11 +72,7 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
         font-size: 1rem;
     }
-    .stButton > button:hover {
-        opacity: 0.95;
-    }
 
-    /* Khusus Tampilan Layar HP */
     @media (max-width: 768px) {
         .block-container {
             padding-left: 1rem !important;
@@ -98,7 +90,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ----------------- LANGKAH 1: PARAMETER CETAK TERLEBIH DAHULU -----------------
+# ----------------- LANGKAH 1: PENGATURAN AWAL -----------------
 st.markdown("##### ⚙️ Langkah 1: Pengaturan Awal")
 c_set1, c_set2 = st.columns(2)
 with c_set1:
@@ -108,7 +100,6 @@ with c_set1:
         index=0
     )
 with c_set2:
-    # Tanggal default hari ini
     today = datetime.date.today()
     tgl_cetak = st.date_input("Tanggal Cetak Dokumen:", today)
 
@@ -133,21 +124,32 @@ def safe_text(txt):
         return ""
     return html.escape(str(txt).strip())
 
-def parse_drp_pdf(pdf_file):
-    reader = PdfReader(pdf_file)
+@st.cache_data(show_spinner=False)
+def parse_drp_pdf(pdf_bytes):
+    reader = PdfReader(io.BytesIO(pdf_bytes))
     full_text = ""
     for page in reader.pages:
         txt = page.extract_text()
         if txt:
             full_text += txt + "\n"
-            
-    nik_m = re.search(r"N\s*[I|1]\s*K\s*:\s*([0-9]{16})", full_text)
-    nama_m = re.search(r"Nama\s*:\s*([A-Z\s]+?)(?=(?:\n|N\s*[I|1]\s*K|Posisi))", full_text)
-    kec_m = re.search(r"Kecamatan\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Desa))", full_text)
-    kab_m = re.search(r"Kabupaten/Kota\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kecamatan))", full_text)
-    prov_m = re.search(r"Provinsi\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kabupaten))", full_text)
+
+    # Ekstraksi Nama & Identitas Riil Langsung dari Berkas PDF
+    def extract_field(pattern, text):
+        m = re.search(pattern, text, flags=re.IGNORECASE)
+        if m:
+            val = m.group(1).strip()
+            # Putus jika menabrak label berikutnya
+            val = re.split(r"\n|Posisi|Jabatan|LOKASI|NIK|Provinsi|Kabupaten|Kecamatan|Desa", val)[0]
+            return clean_word(val)
+        return ""
+
+    nama_val = extract_field(r"Nama\s*:\s*([^\n\r]+)", full_text)
+    nik_val = extract_field(r"N\s*[I|1]\s*K\s*:\s*([0-9\s]+)", full_text).replace(" ", "")
+    kec_val = extract_field(r"Kecamatan\s*:\s*([^\n\r]+)", full_text)
+    kab_val = extract_field(r"Kabupaten(?:/Kota)?\s*:\s*([^\n\r]+)", full_text)
+    prov_val = extract_field(r"Provinsi\s*:\s*([^\n\r]+)", full_text)
     
-    per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text)
+    per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text, flags=re.IGNORECASE)
     if per_m:
         bln_txt = per_m.group(1).title()
         thn_txt = per_m.group(2)
@@ -156,11 +158,11 @@ def parse_drp_pdf(pdf_file):
         thn_txt = "2026"
 
     info = {
-        "nik": nik_m.group(1).strip() if nik_m else "3524193107940002",
-        "nama": clean_word(nama_m.group(1)) if nama_m else "MOHAMMAD AFIFUDDIN",
-        "kecamatan": clean_word(kec_m.group(1)) if kec_m else "BALEN",
-        "kabupaten": clean_word(kab_m.group(1)) if kab_m else "BOJONEGORO",
-        "provinsi": clean_word(prov_m.group(1)) if prov_m else "JAWA TIMUR",
+        "nik": nik_val if nik_val else "-",
+        "nama": nama_val if nama_val else "Nama Tenaga Pendamping",
+        "kecamatan": kec_val if kec_val else "-",
+        "kabupaten": kab_val if kab_val else "-",
+        "provinsi": prov_val if prov_val else "-",
         "bulan_str": bln_txt,
         "tahun_str": thn_txt,
         "periode": f"{bln_txt} Tahun {thn_txt}"
@@ -449,6 +451,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     else:
         sign_block.append(Spacer(1, 40))
 
+    # Nama riil pelapor di bawah garis tanda tangan
     sign_block.append(Paragraph(f"<u>{safe_text(info['nama'])}</u>", style_sign_name))
     elements.append(KeepTogether(sign_block))
 
@@ -458,8 +461,9 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
 
 # ----------------- LANGKAH 3: PRATINJAU & EKSEKUSI CETAK -----------------
 if uploaded_pdf is not None:
+    pdf_bytes = uploaded_pdf.getvalue()
     with st.spinner("Memproses data laporan..."):
-        info, entries, auto_narrative = parse_drp_pdf(uploaded_pdf)
+        info, entries, auto_narrative = parse_drp_pdf(pdf_bytes)
 
     st.success(f"✅ Data Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
 
@@ -484,6 +488,9 @@ if uploaded_pdf is not None:
 
     ttd_bytes = uploaded_ttd.read() if uploaded_ttd is not None else None
 
+    # Nama berkas unduhan tanpa nama orang: KUNLAP_[JENJANG]_[BULAN]_[TAHUN].pdf
+    download_filename = f"KUNLAP_{jenjang_selected}_{info['bulan_str']}_{info['tahun_str']}.pdf"
+
     st.markdown("---")
     if st.button("🚀 Buat Dokumen PDF KUNLAP", type="primary"):
         with st.spinner("Menyusun PDF resmi..."):
@@ -494,7 +501,7 @@ if uploaded_pdf is not None:
                 st.download_button(
                     label="📥 Unduh PDF Sekarang",
                     data=pdf_output,
-                    file_name=f"KUNLAP_{jenjang_selected}_{info['nama']}_{info['bulan_str']}_{info['tahun_str']}.pdf",
+                    file_name=download_filename,
                     mime="application/pdf",
                     use_container_width=True
                 )
