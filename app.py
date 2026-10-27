@@ -12,7 +12,7 @@ import io
 st.set_page_config(page_title="Generator Laporan KUNLAP", page_icon="📄", layout="wide")
 
 st.title("📄 Generator Laporan Kunjungan Lapangan (KUNLAP)")
-st.caption("Unggah file PDF Daily Report (DRP) bulanan untuk mengunduh laporan KUNLAP (.docx) otomatis dengan narasi yang menyesuaikan.")
+st.caption("Unggah file PDF DRP bulanan. Sistem akan mengekstrak narasi riil dari hasil lapangan tiap desa.")
 
 uploaded_file = st.file_uploader("Pilih Berkas PDF DRP", type=["pdf"])
 
@@ -43,20 +43,14 @@ def parse_drp_pdf(pdf_file):
         "periode": per_m.group(1).strip() if per_m else "Juli 2026"
     }
 
-    # Pisahkan blok laporan kunjungan lapangan
+    # Pisahkan blok kunjungan lapangan
     blocks = re.split(r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)", full_text)
     kunlap_entries = []
     
-    # Kategori topik untuk narasi dinamis
-    topik_desa = {
-        "rkpdes": set(),
-        "monev": set(),
-        "stunting": set(),
-        "bumdes": set()
-    }
-    
+    hasil_per_desa = {}
+    topik_fokus = set()
+
     for b in blocks[1:]:
-        # Ambil lokasi
         loc_match = re.search(r"Lokasi:\s*([^\n\r]+)", b)
         date_match = re.search(r"Hari/Tanggal:\s*[A-Za-z]+,\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", b)
         
@@ -66,12 +60,10 @@ def parse_drp_pdf(pdf_file):
             if parts:
                 desa = parts[-1].title()
                 
-        # Format tanggal
         tgl_str = ""
         if date_match:
             tgl_str = date_match.group(1)
         else:
-            # Pola alternatif DD/MM/YY
             alt_date = re.search(r"(\d{2}/\d{2}/\d{2})", b)
             if alt_date:
                 dp = alt_date.group(1).split("/")
@@ -84,84 +76,70 @@ def parse_drp_pdf(pdf_file):
             "kecamatan": info["kecamatan"].title(),
             "desa": desa
         })
-        
-        # Deteksi isi narasi berdasarkan kata kunci di blok aktivitas
-        b_lower = b.lower()
-        if "rkp" in b_lower or "rpjm" in b_lower:
-            topik_desa["rkpdes"].add(desa)
-        if "monev" in b_lower or "apbdes" in b_lower or "opname" in b_lower:
-            topik_desa["monev"].add(desa)
-        if "stunting" in b_lower or "ehdw" in b_lower or "kpm" in b_lower:
-            topik_desa["stunting"].add(desa)
-        if "bumdes" in b_lower or "bum desa" in b_lower:
-            topik_desa["bumdes"].add(desa)
 
-    # Susun Narasi Dinamis
-    narasi = generate_dynamic_narrative(info, topik_desa)
-    
+        # Ambil kalimat Output/Hasil nyata dari teks PDF
+        outputs = re.findall(r"Output/Hasil:\s*([^\n\r]+(?:\n[^\n\r]+)*?)(?=(?:Pukul|\Z))", b)
+        if outputs:
+            clean_output = " ".join([o.replace("\n", " ").strip() for o in outputs])
+            if desa not in hasil_per_desa:
+                hasil_per_desa[desa] = clean_output
+            else:
+                hasil_per_desa[desa] += " " + clean_output
+
+        b_low = b.lower()
+        if "rkp" in b_low or "rpjm" in b_low:
+            topik_fokus.add("rkpdes")
+        if "monev" in b_low or "apbdes" in b_low:
+            topik_fokus.add("monev")
+        if "stunting" in b_low or "ehdw" in b_low:
+            topik_fokus.add("stunting")
+
+    # Susun Narasi Riil
+    narasi = build_real_narrative(info, kunlap_entries, hasil_per_desa, topik_fokus)
     return info, kunlap_entries, narasi
 
-def generate_dynamic_narrative(info, topik):
+def build_real_narrative(info, kunlap_entries, hasil_per_desa, topik_fokus):
     kec = info["kecamatan"].title()
+    total_hari = len(kunlap_entries)
     
-    # 1. Narasi Tujuan
-    tujuan_parts = [
-        f"Kegiatan pendampingan dan monitoring dilaksanakan dalam rangka mendukung tata kelola pemerintahan desa yang efektif, transparan, dan akuntabel di wilayah Kecamatan {kec}."
+    # 1. TUJUAN
+    tujuan_list = [
+        f"Kegiatan pendampingan dan monitoring lapangan selama {total_hari} hari kerja di wilayah Kecamatan {kec} dilaksanakan dalam rangka mendukung tata kelola pemerintahan desa yang akuntabel dan transparan."
     ]
-    if topik["rkpdes"]:
-        tujuan_parts.append(
-            f"Fokus pendampingan diarahkan pada fasilitasi penyusunan Rencana Kerja Pemerintah Desa (RKPDes) melalui pencermatan pagu indikatif, penelaahan dokumen RPJM Desa, serta penyusunan skala prioritas pembangunan desa partisipatif."
-        )
-    if topik["monev"]:
-        tujuan_parts.append(
-            f"Selain itu, kegiatan bertujuan untuk melaksanakan Monitoring dan Evaluasi (Monev) realisasi APBDes guna memastikan keselarasan antara serapan anggaran, kualitas capaian fisik lapangan (opname), serta ketertiban administrasi pertanggungjawaban (SPJ)."
-        )
-    if topik["stunting"]:
-        tujuan_parts.append("Pendampingan juga difokuskan pada penguatan konvergensi pencegahan stunting melalui optimalisasi peran Kader Pembangunan Manusia (KPM) dan pelaporan aplikasi eHDW.")
-    tujuan = " ".join(tujuan_parts)
+    if "rkpdes" in topik_fokus:
+        tujuan_list.append("Pendampingan difokuskan pada fasilitasi penyusunan Rencana Kerja Pemerintah Desa (RKPDes) melalui pencermatan pagu indikatif, penelaahan dokumen RPJM Desa, serta penyusunan skala prioritas kegiatan desa.")
+    if "monev" in topik_fokus:
+        tujuan_list.append("Selain itu, kegiatan bertujuan melaksanakan Monitoring dan Evaluasi (Monev) APBDes guna memastikan kesesuaian antara realisasi serapan anggaran, volume fisik kegiatan (opname), serta kelengkapan SPJ.")
+    if "stunting" in topik_fokus:
+        tujuan_list.append("Pendampingan juga mencakup penguatan pencegahan stunting melalui evaluasi data KPM dan aplikasi eHDW.")
+    tujuan = " ".join(tujuan_list)
 
-    # 2. Narasi Hasil Kunjungan
-    hasil_parts = []
-    if topik["rkpdes"]:
-        desa_rkp = ", Desa ".join(list(topik["rkpdes"])[:4])
-        hasil_parts.append(
-            f"Hasil pendampingan perencanaan di Desa {desa_rkp} dan sekitarnya menunjukkan bahwa Tim Penyusun RKPDes telah memahami tahapan kerja, melakukan sinkronisasi dengan dokumen RPJM Desa, serta menyusun draf awal daftar usulan prioritas kegiatan tahun anggaran mendatang."
-        )
-    if topik["monev"]:
-        desa_monev = ", Desa ".join(list(topik["monev"])[:5])
-        hasil_parts.append(
-            f"Pelaksanaan Monitoring dan Evaluasi APBDes di desa-desa dampingan (antara lain Desa {desa_monev}) membuktikan bahwa pekerjaan infrastruktur fisik secara umum telah rampung sesuai volume dan gambar rencana. Administrasi pembukuan kas dan kelengkapan SPJ terkelola dengan tertib, meski terdapat catatan perbaikan minor terkait kelengkapan bukti transaksi belanja dan pemeliharaan papan transparansi kegiatan."
-        )
-    if topik["stunting"]:
-        desa_stunting = ", Desa ".join(topik["stunting"])
-        hasil_parts.append(
-            f"Terkait bidang kesehatan dan penanganan stunting di Desa {desa_stunting}, telah dilakukan pemutakhiran data sekunder layanan sasaran ibu hamil dan balita pada aplikasi eHDW serta penyiapan scorecard sebagai bahan musyawarah Rembug Stunting desa."
-        )
-    if topik["bumdes"]:
-        hasil_parts.append(
-            "Di sektor ekonomi, telah dilakukan identifikasi awal kelengkapan indikator legalitas dan tata kelola usaha BUMDes sebagai tindak lanjut koordinasi pemeringkatan kelembagaan desa."
-        )
-    hasil = "\n\n".join(hasil_parts)
+    # 2. HASIL KUNJUNGAN (Mengambil intisari riil per desa)
+    hasil_paragraphs = []
+    for desa, desc in list(hasil_per_desa.items())[:6]:  # Ambil sampel desa representatif dari PDF
+        # Ambil maksimal 2 kalimat awal dari output riil agar padat
+        sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 15]
+        ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
+        hasil_paragraphs.append(f"Di Desa {desa}: {ringkasan}")
+    
+    hasil = "\n\n".join(hasil_paragraphs) if hasil_paragraphs else "Pelaksanaan kegiatan lapangan berjalan tertib sesuai agenda kerja."
 
-    # 3. Langkah Tindak Lanjut
-    rtl_parts = []
-    if topik["rkpdes"]:
-        rtl_parts.append("Tim Penyusun RKPDes diinstruksikan untuk melanjutkan proses penyusunan dokumen rancangan RKPDes berpedoman pada pagu indikatif dan musyawarah penggalian aspirasi warga.")
-    if topik["monev"]:
-        rtl_parts.append("Pemerintah desa bersama Tim Pelaksana Kegiatan (TPK) diminta segera menindaklanjuti catatan evaluasi monev dengan melengkapi dokumen lampiran SPJ, administrasi perpajakan, serta memasang prasasti proyek fisik yang telah selesai 100%.")
-    if topik["stunting"]:
-        rtl_parts.append("Mendorong KPM desa untuk merampungkan rekapitulasi data layanan 1.000 HPK guna mematangkan agenda Rembug Stunting tingkat desa.")
-    rtl = " ".join(rtl_parts)
+    # 3. TINDAK LANJUT
+    rtl = (
+        "Sebagai tindak lanjut hasil kunjungan lapangan, Tim Penyusun RKPDes di masing-masing desa diarahkan untuk menuntaskan "
+        "draf dokumen perencanaan berdasarkan pagu indikatif dan prioritas kebutuhan warga. Terhadap hasil evaluasi serapan anggaran "
+        "dan monev fisik, pemerintah desa bersama TPK didorong untuk segera melengkapi kekurangan bukti administrasi SPJ perpajakan "
+        "serta merapikan prasasti proyek sebagai kesiapan pencairan anggaran tahap selanjutnya."
+    )
 
-    # 4. Rekomendasi
-    rek_list = [
-        "Pemerintah desa agar terus memperkuat kualitas perencanaan pembangunan melalui penyusunan RKPDes yang partisipatif, berbasis data, dan selaras dengan arah prioritas penggunaan dana desa.",
-        "Tim Penyusun RKPDes perlu memastikan seluruh usulan kegiatan telah melalui proses pencermatan dan penetapan skala prioritas yang objektif.",
-        "Pemerintah desa agar mempercepat penyelesaian Laporan Realisasi Semester Pertama dan pelunasan kewajiban pajak belanja sebagai syarat penyaluran anggaran tahap berikutnya.",
-        "Tim Pelaksana Kegiatan (TPK) wajib menjaga kerapian dokumentasi progres pekerjaan dan transparansi publik melalui papan informasi proyek di lokasi kegiatan.",
-        "Koordinasi terpadu antara pemerintah desa, jajaran kecamatan, serta jajaran Tenaga Pendamping Profesional perlu terus dioptimalkan secara berkala."
-    ]
-    rekomendasi = "\n".join(rek_list)
+    # 4. REKOMENDASI
+    rekomendasi = (
+        "Pemerintah desa agar terus meningkatkan kualitas perencanaan pembangunan desa berbasis data riil dan musyawarah partisipatif.\n"
+        "Tim Penyusun RKPDes perlu memastikan seluruh usulan kegiatan telah melalui proses verifikasi dan pencermatan RPJM Desa secara cermat.\n"
+        "Pemerintah desa dan TPK agar mempercepat penyelesaian administrasi SPJ belanja serta realisasi fisik yang belum tuntas 100%.\n"
+        "Kelengkapan dokumen administrasi keuangan desa harus terus ditertibkan guna kelancaran evaluasi dan pengajuan tahap berikutnya.\n"
+        "Meningkatkan koordinasi rutin antara pemerintah desa, kecamatan, dan Tenaga Pendamping Profesional demi terwujudnya tata kelola desa yang baik."
+    )
 
     return {
         "tujuan": tujuan,
@@ -178,7 +156,6 @@ def create_docx(info, kunlap_entries, custom_text):
         s.left_margin = Inches(1.0)
         s.right_margin = Inches(1.0)
 
-    # Judul
     p_title = doc.add_paragraph()
     p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r1 = p_title.add_run("LAPORAN KUNJUNGAN LAPANGAN BULANAN\n")
@@ -191,7 +168,6 @@ def create_docx(info, kunlap_entries, custom_text):
     r3.bold = True
     r3.font.size = Pt(12)
 
-    # Identitas
     doc.add_paragraph("Identitas")
     t_id = doc.add_table(rows=7, cols=3)
     t_id.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -215,7 +191,6 @@ def create_docx(info, kunlap_entries, custom_text):
 
     doc.add_paragraph("\nWaktu Pelaksanaan Kunjungan Lapangan")
 
-    # Tabel Kunjungan
     table = doc.add_table(rows=2 + len(kunlap_entries), cols=4)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
@@ -254,7 +229,6 @@ def create_docx(info, kunlap_entries, custom_text):
     p_tot = doc.add_paragraph()
     p_tot.add_run(f"\nTotal Hari Kunjungan Lapangan Bulan {info['periode']} : {len(kunlap_entries)} Hari").bold = True
 
-    # Bagian Narasi
     doc.add_paragraph("Tujuan Kunjungan Lapangan").runs[0].bold = True
     p_tujuan = doc.add_paragraph(custom_text["tujuan"])
     p_tujuan.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -275,7 +249,6 @@ def create_docx(info, kunlap_entries, custom_text):
             p_rek = doc.add_paragraph(rek.strip(), style='List Bullet')
             p_rek.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
 
-    # Tanda Tangan
     doc.add_paragraph("\n")
     p_sign = doc.add_paragraph()
     p_sign.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -290,7 +263,7 @@ def create_docx(info, kunlap_entries, custom_text):
     return bio
 
 if uploaded_file is not None:
-    with st.spinner("Mengekstraksi narasi dan tabel dari PDF DRP..."):
+    with st.spinner("Membaca rincian Output dan Kegiatan tiap desa dari PDF..."):
         info, entries, auto_narrative = parse_drp_pdf(uploaded_file)
 
     st.success(f"Laporan diproses untuk: **{info['nama']}** | Terdeteksi **{len(entries)} Hari Kunjungan Lapangan**")
@@ -302,9 +275,9 @@ if uploaded_file is not None:
         st.dataframe(entries, use_container_width=True)
 
     with col2:
-        st.subheader("📝 Narasi Otomatis (Hasil Analisis PDF)")
+        st.subheader("📝 Narasi Riil Hasil Ekstraksi PDF")
         txt_tujuan = st.text_area("Tujuan Kunjungan Lapangan", auto_narrative["tujuan"], height=130)
-        txt_hasil = st.text_area("Hasil Kunjungan Lapangan", auto_narrative["hasil"], height=180)
+        txt_hasil = st.text_area("Hasil Kunjungan Lapangan (Otomatis per Desa)", auto_narrative["hasil"], height=200)
         txt_rtl = st.text_area("Langkah Tindak Lanjut", auto_narrative["rtl"], height=120)
         txt_rek = st.text_area("Rekomendasi", auto_narrative["rekomendasi"], height=140)
 
