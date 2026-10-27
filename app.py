@@ -2,7 +2,6 @@ import streamlit as st
 from pypdf import PdfReader
 import re
 import datetime
-import calendar
 import io
 import html
 from PIL import Image
@@ -17,7 +16,6 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT, TA_LEFT
 
-# Konfigurasi Halaman Responsif
 st.set_page_config(
     page_title="KUNLAP Generator - Kemendesa",
     page_icon="📋",
@@ -25,14 +23,13 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- INJEKSI CSS MODERN & RESPONSIF HP -----------------
+# ----------------- CSS RESPONSIF -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
-    
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
         color: #FFFFFF !important;
@@ -53,14 +50,12 @@ st.markdown("""
         font-size: 0.88rem;
         line-height: 1.4;
     }
-
     .stFileUploader, .stSelectbox, .stDateInput, .stTextArea {
         background: transparent !important;
         padding: 0 !important;
         border: none !important;
         margin-bottom: 14px;
     }
-
     .stButton > button {
         width: 100%;
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
@@ -72,7 +67,6 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
         font-size: 1rem;
     }
-
     @media (max-width: 768px) {
         .block-container {
             padding-left: 1rem !important;
@@ -134,7 +128,6 @@ def parse_drp_pdf(pdf_bytes):
         if txt:
             full_text += txt + "\n"
 
-    # Ekstraksi Identitas
     def extract_field(pattern, text):
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if m:
@@ -168,7 +161,6 @@ def parse_drp_pdf(pdf_bytes):
         "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # Ekstraksi Blok Kunjungan Lapangan
     kunlap_pattern = re.compile(
         r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\).*?Lokasi:\s*([^\n\r]+)(.*?)(?=(?:Deskripsi kegiatan:|\Z|DATA CUTI))",
         re.DOTALL
@@ -206,7 +198,9 @@ def parse_drp_pdf(pdf_bytes):
 
     for idx, (raw_loc, body) in enumerate(matches):
         parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
+        # Normalisasi desa & kecamatan agar tidak tertukar
         desa = parts[-1].title() if parts else "Desa Dampingan"
+        kec_terbaca = info["kecamatan"].title()
 
         if idx < len(kunlap_dates):
             tgl_formatted = kunlap_dates[idx]
@@ -220,7 +214,7 @@ def parse_drp_pdf(pdf_bytes):
 
         kunlap_entries.append({
             "tanggal": tgl_formatted,
-            "kecamatan": info["kecamatan"].title(),
+            "kecamatan": kec_terbaca,
             "desa": desa
         })
 
@@ -242,6 +236,8 @@ def parse_drp_pdf(pdf_bytes):
         res_m = re.search(r"(?:Output/Hasil|Hasil)\s*:\s*(.+?)(?=(?:Tindak Lanjut|Pukul|\Z))", body, re.DOTALL)
         if res_m:
             c_res = re.sub(r"\s+", " ", res_m.group(1)).strip()
+            # Bersihkan nomor urut seperti '1. ', '2. ', '3. ' yang menempel di tengah teks
+            c_res = re.sub(r"(?<=\.)\s*\d+\.\s*", " ", c_res)
             c_res = re.sub(r"^\d+\.\s*", "", c_res)
             if desa not in hasil_per_desa and len(c_res) > 20:
                 hasil_per_desa[desa] = c_res
@@ -274,10 +270,9 @@ def parse_drp_pdf(pdf_bytes):
         )
     tujuan = "\n\n".join(tujuan_paras)
 
-    # 2. Hasil Riil (Aman dari Titik Rupiah / Angka)
+    # 2. Hasil Riil
     hasil_list = []
     for desa, desc in list(hasil_per_desa.items())[:4]:
-        # Memisahkan kalimat dengan mengabaikan titik di antara angka/nominal uang
         sentences = re.split(r'(?<!\d)\.(?!\d)\s*', desc)
         valid_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
         ringkasan = ". ".join(valid_sentences[:2]) + "." if valid_sentences else desc
@@ -313,7 +308,7 @@ def parse_drp_pdf(pdf_bytes):
     }
     return info, kunlap_entries, narasi
 
-# ----------------- GENERATOR PDF RESMI (REPORTLAB) -----------------
+# ----------------- GENERATOR PDF RESMI -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -331,14 +326,33 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         'DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER
     )
     style_heading = ParagraphStyle(
-        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=8, spaceAfter=4
+        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=9, spaceAfter=4
     )
+    
+    # Paragraf Justify dengan lekuk alinea masuk (firstLineIndent 1 cm) dan spasi antar-paragraf
     style_body = ParagraphStyle(
-        'BodyJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY, spaceAfter=6
+        'BodyJustify',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9.5,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        firstLineIndent=28.35, # Indentasi awal alinea 1.0 cm
+        spaceAfter=7
     )
+
     style_bullet = ParagraphStyle(
-        'BulletJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-10, spaceAfter=4
+        'BulletJustify',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9.5,
+        leading=13.5,
+        alignment=TA_JUSTIFY,
+        leftIndent=15,
+        firstLineIndent=-10,
+        spaceAfter=4
     )
+
     style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12)
     style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12, alignment=TA_CENTER)
     style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=TA_CENTER)
@@ -352,7 +366,6 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     }
     posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("PD", "PENDAMPING DESA"))
 
-    # Judul Dokumen
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
