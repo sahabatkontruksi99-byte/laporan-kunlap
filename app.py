@@ -2,6 +2,7 @@ import streamlit as st
 from pypdf import PdfReader
 import re
 import datetime
+import calendar
 import io
 import html
 from PIL import Image
@@ -23,13 +24,14 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- CSS RESPONSIF -----------------
+# ----------------- INJEKSI CSS MODERN & RESPONSIF HP -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
+    
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
         color: #FFFFFF !important;
@@ -50,12 +52,14 @@ st.markdown("""
         font-size: 0.88rem;
         line-height: 1.4;
     }
+
     .stFileUploader, .stSelectbox, .stDateInput, .stTextArea {
         background: transparent !important;
         padding: 0 !important;
         border: none !important;
         margin-bottom: 14px;
     }
+
     .stButton > button {
         width: 100%;
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
@@ -67,6 +71,7 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
         font-size: 1rem;
     }
+
     @media (max-width: 768px) {
         .block-container {
             padding-left: 1rem !important;
@@ -198,7 +203,6 @@ def parse_drp_pdf(pdf_bytes):
 
     for idx, (raw_loc, body) in enumerate(matches):
         parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
-        # Normalisasi desa & kecamatan agar tidak tertukar
         desa = parts[-1].title() if parts else "Desa Dampingan"
         kec_terbaca = info["kecamatan"].title()
 
@@ -232,12 +236,12 @@ def parse_drp_pdf(pdf_bytes):
         if "perlinsos" in b_low or "bansos" in b_low:
             topik_ditemukan["perlinsos"].add(desa)
 
-        # Tangkap Output / Hasil Riil
+        # Ambil kalimat output/hasil riil tanpa merusak angka nominal rupiah
         res_m = re.search(r"(?:Output/Hasil|Hasil)\s*:\s*(.+?)(?=(?:Tindak Lanjut|Pukul|\Z))", body, re.DOTALL)
         if res_m:
             c_res = re.sub(r"\s+", " ", res_m.group(1)).strip()
-            # Bersihkan nomor urut seperti '1. ', '2. ', '3. ' yang menempel di tengah teks
-            c_res = re.sub(r"(?<=\.)\s*\d+\.\s*", " ", c_res)
+            # Bersihkan nomor urut daftar log saja (misal: " 2. Terlaksananya") tanpa merusak titik angka rupiah
+            c_res = re.sub(r"(?<=[a-zA-Z\.\,\;])\s+\d+\.\s+", " ", c_res)
             c_res = re.sub(r"^\d+\.\s*", "", c_res)
             if desa not in hasil_per_desa and len(c_res) > 20:
                 hasil_per_desa[desa] = c_res
@@ -270,9 +274,10 @@ def parse_drp_pdf(pdf_bytes):
         )
     tujuan = "\n\n".join(tujuan_paras)
 
-    # 2. Hasil Riil
+    # 2. Hasil Riil (Titik rupiah dilindungi dengan regex presisi)
     hasil_list = []
     for desa, desc in list(hasil_per_desa.items())[:4]:
+        # Memisahkan kalimat murni (bukan titik rupiah)
         sentences = re.split(r'(?<!\d)\.(?!\d)\s*', desc)
         valid_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
         ringkasan = ". ".join(valid_sentences[:2]) + "." if valid_sentences else desc
@@ -308,7 +313,7 @@ def parse_drp_pdf(pdf_bytes):
     }
     return info, kunlap_entries, narasi
 
-# ----------------- GENERATOR PDF RESMI -----------------
+# ----------------- GENERATOR PDF RESMI REPORTLAB -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -326,18 +331,18 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         'DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER
     )
     style_heading = ParagraphStyle(
-        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=9, spaceAfter=4
+        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=10, spaceAfter=4
     )
     
-    # Paragraf Justify dengan lekuk alinea masuk (firstLineIndent 1 cm) dan spasi antar-paragraf
+    # Paragraf Justify dengan lekuk alinea masuk (firstLineIndent = 28.35 pt / 1 cm)
     style_body = ParagraphStyle(
-        'BodyJustify',
+        'BodyJustifyIndent',
         parent=styles['Normal'],
         fontName='Helvetica',
         fontSize=9.5,
-        leading=14,
+        leading=14.5,
         alignment=TA_JUSTIFY,
-        firstLineIndent=28.35, # Indentasi awal alinea 1.0 cm
+        firstLineIndent=28.35, # 1 cm indentasi awal baris
         spaceAfter=7
     )
 
@@ -366,12 +371,13 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     }
     posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("PD", "PENDAMPING DESA"))
 
+    # Judul
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
     elements.append(Spacer(1, 10))
 
-    # A. Identitas
+    # A. Identitas (Tabel 3 Kolom yang Lurus Rapi)
     elements.append(Paragraph("A. Identitas", style_heading))
     id_data = [
         [Paragraph("NIK", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nik"]), style_cell)],
@@ -437,22 +443,25 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     elements.append(t_kunlap)
     elements.append(Spacer(1, 10))
 
-    # C, D, E, F
+    # C. Tujuan
     elements.append(Paragraph("C. Tujuan Kunjungan Lapangan", style_heading))
     for p in custom_text["tujuan"].split("\n\n"):
         if p.strip():
             elements.append(Paragraph(safe_text(p.strip()), style_body))
 
+    # D. Hasil
     elements.append(Paragraph("D. Hasil Kunjungan Lapangan", style_heading))
     for p in custom_text["hasil"].split("\n\n"):
         if p.strip():
             elements.append(Paragraph(safe_text(p.strip()), style_body))
 
+    # E. Tindak Lanjut
     elements.append(Paragraph("E. Langkah Tindak Lanjut Penanganan Masalah :", style_heading))
     for p in custom_text["rtl"].split("\n\n"):
         if p.strip():
             elements.append(Paragraph(safe_text(p.strip()), style_body))
 
+    # F. Rekomendasi
     elements.append(Paragraph("F. Rekomendasi :", style_heading))
     for p in custom_text["rekomendasi"].split("\n"):
         if p.strip():
