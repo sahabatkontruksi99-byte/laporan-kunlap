@@ -134,7 +134,7 @@ def parse_drp_pdf(pdf_file):
     )
 
     hasil_list = []
-    for desa, desc in list(hasil_desa.items())[:3]:
+    for desa, desc in list(hasil_per_desa.items())[:3]:
         sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 15]
         ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
         hasil_list.append(f"Hasil pendampingan di Desa {desa} menunjukkan bahwa {ringkasan.lower() if ringkasan.startswith('Ter') else ringkasan}")
@@ -176,7 +176,6 @@ def parse_drp_pdf(pdf_file):
 # ----------------- GENERATOR PDF RESMI -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
-    # Lebar kertas A4 = 21 cm. Margin 2.0 cm kiri-kanan -> lebar efektif konten = 17.0 cm
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -282,7 +281,6 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         [Paragraph("Posisi", style_cell), Paragraph(":", style_cell), Paragraph(posisi_val, style_cell)],
         [Paragraph("Jabatan", style_cell), Paragraph(":", style_cell), Paragraph(jabatan_val, style_cell)],
     ]
-    # Total lebar = 3.2 + 0.3 + 13.5 = 17.0 cm (pas dengan margin)
     t_id = Table(id_data, colWidths=[3.2 * cm, 0.3 * cm, 13.5 * cm])
     t_id.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
@@ -326,7 +324,6 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         ""
     ])
 
-    # Total lebar kolom = 2.5 + 3.5 + 5.0 + 6.0 = 17.0 cm
     t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.0 * cm, 6.0 * cm], repeatRows=2)
     t_kunlap.setStyle(TableStyle([
         ('SPAN', (2, 0), (3, 0)),
