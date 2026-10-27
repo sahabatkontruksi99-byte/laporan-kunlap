@@ -20,7 +20,7 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT, TA_LEFT
 st.set_page_config(page_title="Generator Laporan KUNLAP", page_icon="📄", layout="wide")
 
 st.title("📄 Generator Laporan Kunjungan Lapangan (KUNLAP)")
-st.caption("Unggah PDF DRP bulanan, tentukan jenjang, tanggal cetak, dan tanda tangan digital.")
+st.caption("Unggah PDF DRP bulanan. Narasi tujuan dan hasil akan otomatis beradaptasi dengan isi kegiatan.")
 
 # ----------------- FUNGSI EKSTRAKSI DATA PDF -----------------
 def clean_word(txt):
@@ -75,6 +75,15 @@ def parse_drp_pdf(pdf_file):
     blocks = re.split(r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)", full_text)
     kunlap_entries = []
     hasil_per_desa = {}
+    
+    # Deteksi topik aktual yang ada di bulan ini
+    topik_ditemukan = {
+        "rkpdes": set(),
+        "monev": set(),
+        "stunting": set(),
+        "bumdes": set(),
+        "indeks_desa": set()
+    }
 
     bulan_dict = {
         "januari": "01", "februari": "02", "maret": "03", "april": "04",
@@ -112,6 +121,19 @@ def parse_drp_pdf(pdf_file):
             "desa": desa
         })
 
+        # Deteksi Topik Riil
+        b_low = b.lower()
+        if "rkp" in b_low or "rpjm" in b_low:
+            topik_ditemukan["rkpdes"].add(desa)
+        if "monev" in b_low or "apbdes" in b_low or "opname" in b_low:
+            topik_ditemukan["monev"].add(desa)
+        if "stunting" in b_low or "ehdw" in b_low or "kpm" in b_low:
+            topik_ditemukan["stunting"].add(desa)
+        if "bumdes" in b_low or "bum desa" in b_low:
+            topik_ditemukan["bumdes"].add(desa)
+        if "indeks desa" in b_low or "idm" in b_low:
+            topik_ditemukan["indeks_desa"].add(desa)
+
         # Ambil Output/Hasil Riil
         outputs = re.findall(r"Output/Hasil:\s*(.+?)(?=(?:Pukul|\Z))", b, flags=re.DOTALL)
         if outputs:
@@ -121,49 +143,64 @@ def parse_drp_pdf(pdf_file):
                 hasil_per_desa[desa] = clean_output
 
     kec = info["kecamatan"].title()
-    tujuan = (
-        "Kegiatan pendampingan dan monitoring dilaksanakan dalam rangka mendukung penyelenggaraan pemerintahan "
-        "desa yang efektif, akuntabel, dan sesuai dengan ketentuan peraturan perundang-undangan. Pendampingan difokuskan "
-        "pada fasilitasi penyusunan Rencana Kerja Pemerintah Desa (RKPDes) Tahun Anggaran 2027 melalui pencermatan pagu indikatif, "
-        "penelaahan dokumen RPJM Desa, penyusunan skala prioritas pembangunan, serta penguatan kapasitas Tim Penyusun RKPDes "
-        "agar proses perencanaan desa berjalan partisipatif, terarah, dan sesuai kebutuhan masyarakat.\n\n"
-        f"Selain itu, kegiatan juga bertujuan untuk melaksanakan Monitoring dan Evaluasi (Monev) APBDes Tahap I pada desa-desa "
-        f"di Kecamatan {kec} guna memastikan kesesuaian antara realisasi anggaran, capaian fisik kegiatan, serta kelengkapan "
-        "administrasi pertanggungjawaban. Kegiatan monitoring ini merupakan bagian dari upaya pembinaan dan pengawasan "
-        "terhadap pengelolaan keuangan desa agar pelaksanaan pembangunan desa dapat berjalan secara transparan, akuntabel, dan tepat sasaran."
+    total_hari = len(kunlap_entries)
+    
+    # ----------------- PENYUSUNAN TUJUAN DINAMIS -----------------
+    tujuan_paras = []
+    tujuan_paras.append(
+        f"Kegiatan pendampingan dan monitoring lapangan selama {total_hari} hari kerja pada periode {info['periode']} "
+        f"di wilayah Kecamatan {kec} dilaksanakan dalam rangka mendukung efektivitas tata kelola pemerintahan desa, akuntabilitas pengelolaan sumber daya desa, serta kepatuhan terhadap peraturan perundang-undangan yang berlaku."
     )
+    
+    fokus_tujuan = []
+    if topik_ditemukan["rkpdes"]:
+        fokus_tujuan.append("fasilitasi tahapan penyusunan Rencana Kerja Pemerintah Desa (RKPDes) melalui pencermatan pagu indikatif, pengkajian ulang dokumen RPJM Desa, serta penentuan skala prioritas program tahun mendatang")
+    if topik_ditemukan["monev"]:
+        fokus_tujuan.append("pelaksanaan Monitoring dan Evaluasi (Monev) pengelolaan APBDes guna memastikan kesesuaian antara penyerapan anggaran dengan realisasi fisik pekerjaan di lapangan serta ketertiban administrasi pertanggungjawaban (SPJ)")
+    if topik_ditemukan["indeks_desa"]:
+        fokus_tujuan.append("pendampingan pemutakhiran data Indeks Desa guna merefleksikan status perkembangan dan ketahanan sosial ekonomi desa")
+    if topik_ditemukan["stunting"]:
+        fokus_tujuan.append("penguatan kapasitas Kader Pembangunan Manusia (KPM) dalam pemutakhiran data gizi dan layanan stunting melalui aplikasi eHDW")
+    if topik_ditemukan["bumdes"]:
+        fokus_tujuan.append("evaluasi kelembagaan dan fasilitasi pemeringkatan Badan Usaha Milik Desa (BUM Desa)")
 
+    if fokus_tujuan:
+        tujuan_paras.append(
+            f"Fokus kegiatan pendampingan bulan ini diarahkan pada beberapa agenda strategis, meliputi: {'; '.join(fokus_tujuan)}. "
+            "Melalui pendampingan intensif ini, diharapkan seluruh tahapan pembangunan dan administrasi desa berjalan partisipatif, transparan, dan tepat waktu."
+        )
+    tujuan = "\n\n".join(tujuan_paras)
+
+    # ----------------- PENYUSUNAN HASIL DINAMIS -----------------
     hasil_list = []
-    for desa, desc in list(hasil_per_desa.items())[:3]:
+    for desa, desc in list(hasil_per_desa.items())[:4]:
         sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 15]
         ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
         hasil_list.append(f"Hasil pendampingan di Desa {desa} menunjukkan bahwa {ringkasan.lower() if ringkasan.startswith('Ter') else ringkasan}")
     
-    hasil = "\n\n".join(hasil_list) if hasil_list else (
-        "Hasil pendampingan dan monitoring membuktikan bahwa secara umum pelaksanaan kegiatan pembangunan fisik "
-        "telah sesuai dengan dokumen perencanaan dan progres pekerjaan di lapangan. Administrasi pertanggungjawaban "
-        "kegiatan juga telah tersedia dengan cukup baik dengan beberapa catatan penyempurnaan lampiran SPJ."
-    )
+    hasil = "\n\n".join(hasil_list) if hasil_list else "Kegiatan pendampingan lapangan terlaksana dengan lancar sesuai jadwal penugasan."
 
-    rtl = (
-        "Sebagai tindak lanjut hasil pendampingan penyusunan RKPDes, Tim Penyusun RKPDes di masing-masing desa diarahkan "
-        "untuk melanjutkan proses penyusunan dokumen perencanaan dengan mengacu pada hasil pencermatan RPJM Desa, pagu indikatif, "
-        "serta prioritas kebutuhan masyarakat yang telah disepakati. Pendampingan lanjutan akan dilakukan untuk memastikan dokumen "
-        "RKPDes tersusun sesuai tahapan dan ketentuan yang berlaku.\n\n"
-        "Terhadap hasil evaluasi serapan anggaran, pemerintah desa didorong untuk segera menindaklanjuti berbagai kendala teknis "
-        "yang telah teridentifikasi sehingga pelaksanaan kegiatan pembangunan dan pemberdayaan masyarakat dapat berjalan lebih optimal.\n\n"
-        "Berdasarkan hasil monitoring APBDes Tahap I, pemerintah desa diminta untuk segera melengkapi kekurangan dokumen administrasi "
-        "dan pertanggungjawaban kegiatan, khususnya terkait lampiran SPJ dan dokumen pendukung lainnya."
-    )
+    # ----------------- PENYUSUNAN RTL DINAMIS -----------------
+    rtl_items = []
+    if topik_ditemukan["rkpdes"]:
+        rtl_items.append("Mengarahkan Tim Penyusun RKPDes untuk segera merampungkan draf dokumen rancangan berdasarkan pagu indikatif dan hasil musyawarah warga.")
+    if topik_ditemukan["monev"]:
+        rtl_items.append("Mendorong pemerintah desa dan TPK untuk melengkapi kekurangan dokumen SPJ perpajakan serta menyelesaikan pekerjaan fisik yang masih berjalan.")
+    if topik_ditemukan["indeks_desa"]:
+        rtl_items.append("Menyelesaikan proses verifikasi dan finalisasi kuesioner data sekunder Indeks Desa tingkat kecamatan.")
+    if not rtl_items:
+        rtl_items.append("Melakukan pendampingan lanjutan terhadap penyelesaian administrasi desa dan evaluasi capaian kegiatan.")
+    rtl = " ".join(rtl_items)
 
-    rekomendasi = (
-        "Pemerintah desa agar terus meningkatkan kualitas perencanaan pembangunan melalui penyusunan RKPDes yang berbasis data, kebutuhan masyarakat, serta selaras dengan RPJM Desa dan arah kebijakan pembangunan nasional maupun daerah.\n"
-        "Tim Penyusun RKPDes perlu memastikan bahwa seluruh usulan kegiatan yang dimasukkan dalam dokumen perencanaan telah melalui proses verifikasi, pencermatan, dan penetapan skala prioritas secara objektif dan partisipatif.\n"
-        "Pemerintah desa agar mempercepat realisasi kegiatan yang masih belum optimal sehingga target penyerapan anggaran dapat tercapai sesuai jadwal yang telah ditetapkan.\n"
-        "Kelengkapan administrasi dan pertanggungjawaban keuangan desa perlu menjadi perhatian utama, mengingat dokumen tersebut merupakan syarat penting dalam proses pengawasan, audit, maupun pengajuan pencairan anggaran tahap berikutnya.\n"
-        "Hasil monitoring dan evaluasi hendaknya dijadikan bahan pembelajaran dan perbaikan berkelanjutan guna meningkatkan efektivitas pelaksanaan pembangunan desa, kualitas pelayanan kepada masyarakat, serta akuntabilitas pengelolaan keuangan desa.\n"
-        "Pendampingan dan koordinasi antara pemerintah desa, kecamatan, serta tenaga pendamping profesional perlu terus ditingkatkan agar pelaksanaan pembangunan dan pengelolaan pemerintahan desa berjalan sesuai prinsip tata kelola yang baik (good governance)."
-    )
+    # ----------------- REKOMENDASI -----------------
+    rek_items = [
+        "Pemerintah desa agar terus meningkatkan kualitas perencanaan pembangunan desa berbasis data riil dan musyawarah partisipatif.",
+        "Tim Penyusun RKPDes perlu memastikan seluruh usulan kegiatan telah melalui proses verifikasi dan pencermatan RPJM Desa secara cermat.",
+        "Pemerintah desa dan TPK agar mempercepat penyelesaian administrasi SPJ belanja serta realisasi fisik yang belum tuntas 100%.",
+        "Kelengkapan dokumen administrasi keuangan desa harus terus ditertibkan guna kelancaran evaluasi dan pengajuan tahap berikutnya.",
+        "Meningkatkan koordinasi rutin antara pemerintah desa, kecamatan, dan Tenaga Pendamping Profesional demi terwujudnya tata kelola desa yang baik."
+    ]
+    rekomendasi = "\n".join(rek_items)
 
     narasi = {
         "tujuan": tujuan,
@@ -403,7 +440,7 @@ with col_up2:
     uploaded_ttd = st.file_uploader("2. Unggah Gambar Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
 if uploaded_pdf is not None:
-    with st.spinner("Mengekstrak dan merapikan data dari PDF DRP..."):
+    with st.spinner("Menganalisis isi kegiatan riil tiap desa dari PDF DRP..."):
         info, entries, auto_narrative = parse_drp_pdf(uploaded_pdf)
 
     st.success(f"Berhasil membaca data: **{info['nama']}** | Total Kunjungan: **{len(entries)} Hari**")
@@ -434,7 +471,7 @@ if uploaded_pdf is not None:
         st.dataframe(entries, use_container_width=True)
 
     with col2:
-        st.subheader("📝 Narasi Laporan (Bisa Disesuaikan)")
+        st.subheader("📝 Narasi Laporan (Hasil Analisis PDF)")
         txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", auto_narrative["tujuan"], height=130)
         txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", auto_narrative["hasil"], height=160)
         txt_rtl = st.text_area("E. Langkah Tindak Lanjut", auto_narrative["rtl"], height=110)
@@ -449,7 +486,6 @@ if uploaded_pdf is not None:
 
     ttd_bytes = uploaded_ttd.read() if uploaded_ttd is not None else None
 
-    # Tombol Eksekusi Pembuatan PDF
     st.markdown("---")
     if st.button("🚀 Proses & Buat PDF Laporan", type="primary"):
         with st.spinner("Menyusun PDF resmi..."):
