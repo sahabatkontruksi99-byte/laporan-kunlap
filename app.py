@@ -1,20 +1,33 @@
 import streamlit as st
 from pypdf import PdfReader
 import re
-from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
+import datetime
+import calendar
 import io
+from PIL import Image
+
+# ReportLab untuk membuat PDF murni
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, KeepTogether
+)
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT, TA_LEFT
 
 st.set_page_config(page_title="Generator Laporan KUNLAP", page_icon="📄", layout="wide")
 
 st.title("📄 Generator Laporan Kunjungan Lapangan (KUNLAP)")
-st.caption("Unggah file PDF DRP bulanan. Sistem akan mengekstrak narasi riil dari hasil lapangan tiap desa.")
+st.caption("Unggah PDF DRP bulanan, pilih jenjang, tanggal cetak, dan tanda tangan untuk mengunduh PDF resmi.")
 
-uploaded_file = st.file_uploader("Pilih Berkas PDF DRP", type=["pdf"])
+# ----------------- FUNGSI EKSTRAKSI DATA PDF -----------------
+def clean_word(txt):
+    if not txt:
+        return ""
+    for junk in ["IDENTITAS", "TPP", "LOKASI", "PENUGASAN", "Nama", "NIK", "Posisi", "Jabatan", "Desa", "Kecamatan", "Kabupaten", "Provinsi"]:
+        txt = re.sub(rf"\b{junk}\b", "", txt, flags=re.IGNORECASE)
+    return txt.strip(": -")
 
 def parse_drp_pdf(pdf_file):
     reader = PdfReader(pdf_file)
@@ -25,261 +38,381 @@ def parse_drp_pdf(pdf_file):
             full_text += txt + "\n"
             
     # Ekstraksi Identitas
-    nik_m = re.search(r"N[I|1]K\s*:\s*([0-9]+)", full_text)
-    nama_m = re.search(r"Nama\s*:\s*([A-Z\s]+)", full_text)
-    kec_m = re.search(r"Kecamatan\s*:\s*([A-Za-z0-9\s]+)", full_text)
-    kab_m = re.search(r"Kabupaten/Kota\s*:\s*([A-Za-z0-9\s]+)", full_text)
-    prov_m = re.search(r"Provinsi\s*:\s*([A-Za-z0-9\s]+)", full_text)
-    pos_m = re.search(r"Posisi\s*:\s*([A-Za-z0-9\s]+)", full_text)
-    per_m = re.search(r"Periode:\s*([A-Za-z0-9\s\(\)\-\/]+)", full_text)
+    nik_m = re.search(r"N\s*[I|1]\s*K\s*:\s*([0-9]{16})", full_text)
+    nama_m = re.search(r"Nama\s*:\s*([A-Z\s]+?)(?=(?:\n|N\s*[I|1]\s*K|Posisi))", full_text)
+    kec_m = re.search(r"Kecamatan\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Desa))", full_text)
+    kab_m = re.search(r"Kabupaten/Kota\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kecamatan))", full_text)
+    prov_m = re.search(r"Provinsi\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kabupaten))", full_text)
+    pos_m = re.search(r"Posisi\s*:\s*([A-Za-z0-9]+)", full_text)
     
+    per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text)
+    if per_m:
+        bln_txt = per_m.group(1).title()
+        thn_txt = per_m.group(2)
+    else:
+        bln_txt = "Juli"
+        thn_txt = "2026"
+
     info = {
         "nik": nik_m.group(1).strip() if nik_m else "3524193107940002",
-        "nama": nama_m.group(1).strip() if nama_m else "MOHAMMAD AFIFUDDIN",
-        "kecamatan": kec_m.group(1).strip() if kec_m else "BALEN",
-        "kabupaten": kab_m.group(1).strip() if kab_m else "BOJONEGORO",
-        "provinsi": prov_m.group(1).strip() if prov_m else "JAWA TIMUR",
-        "posisi": pos_m.group(1).strip() if pos_m else "PD",
-        "periode": per_m.group(1).strip() if per_m else "Juli 2026"
+        "nama": clean_word(nama_m.group(1)) if nama_m else "MOHAMMAD AFIFUDDIN",
+        "kecamatan": clean_word(kec_m.group(1)) if kec_m else "BALEN",
+        "kabupaten": clean_word(kab_m.group(1)) if kab_m else "BOJONEGORO",
+        "provinsi": clean_word(prov_m.group(1)) if prov_m else "JAWA TIMUR",
+        "posisi_raw": clean_word(pos_m.group(1)) if pos_m else "PD",
+        "bulan_str": bln_txt,
+        "tahun_str": thn_txt,
+        "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # Pisahkan blok kunjungan lapangan
+    # Parsing Entri Kunjungan Lapangan
     blocks = re.split(r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)", full_text)
     kunlap_entries = []
-    
     hasil_per_desa = {}
-    topik_fokus = set()
+
+    bulan_dict = {
+        "januari": "01", "februari": "02", "maret": "03", "april": "04",
+        "mei": "05", "juni": "06", "juli": "07", "agustus": "08",
+        "september": "09", "oktober": "10", "november": "11", "desember": "12"
+    }
 
     for b in blocks[1:]:
         loc_match = re.search(r"Lokasi:\s*([^\n\r]+)", b)
-        date_match = re.search(r"Hari/Tanggal:\s*[A-Za-z]+,\s*(\d{1,2}\s+[A-Za-z]+\s+\d{4})", b)
+        date_str_match = re.search(r"Hari/Tanggal:\s*[A-Za-z]+,\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", b)
+        alt_date = re.search(r"(\d{2})/(\d{2})/(\d{2})", b)
         
+        if date_str_match:
+            d = str(int(date_str_match.group(1)))
+            bln = bulan_dict.get(date_str_match.group(2).lower(), "07")
+            thn = date_str_match.group(3)
+            tgl_formatted = f"{d}-{bln}-{thn}"
+        elif alt_date:
+            d = str(int(alt_date.group(1)))
+            bln = alt_date.group(2)
+            thn = "20" + alt_date.group(3)
+            tgl_formatted = f"{d}-{bln}-{thn}"
+        else:
+            tgl_formatted = "-"
+
         desa = "Desa Dampingan"
         if loc_match:
-            parts = [p.strip() for p in loc_match.group(1).split("/") if p.strip()]
+            parts = [clean_word(p) for p in loc_match.group(1).split("/") if clean_word(p)]
             if parts:
                 desa = parts[-1].title()
-                
-        tgl_str = ""
-        if date_match:
-            tgl_str = date_match.group(1)
-        else:
-            alt_date = re.search(r"(\d{2}/\d{2}/\d{2})", b)
-            if alt_date:
-                dp = alt_date.group(1).split("/")
-                tgl_str = f"{int(dp[0])}-{dp[1]}-20{dp[2]}"
-            else:
-                tgl_str = "-"
 
         kunlap_entries.append({
-            "tanggal": tgl_str,
+            "tanggal": tgl_formatted,
             "kecamatan": info["kecamatan"].title(),
             "desa": desa
         })
 
-        # Ambil kalimat Output/Hasil nyata dari teks PDF
-        outputs = re.findall(r"Output/Hasil:\s*([^\n\r]+(?:\n[^\n\r]+)*?)(?=(?:Pukul|\Z))", b)
+        # Ambil Output/Hasil Riil
+        outputs = re.findall(r"Output/Hasil:\s*(.+?)(?=(?:Pukul|\Z))", b, flags=re.DOTALL)
         if outputs:
-            clean_output = " ".join([o.replace("\n", " ").strip() for o in outputs])
-            if desa not in hasil_per_desa:
+            clean_output = " ".join([re.sub(r"\s+", " ", o).strip() for o in outputs])
+            clean_output = re.sub(r"\d{1,2}[\.:]\d{2}\s*WIB.*$", "", clean_output).strip()
+            if desa not in hasil_per_desa and clean_output:
                 hasil_per_desa[desa] = clean_output
-            else:
-                hasil_per_desa[desa] += " " + clean_output
 
-        b_low = b.lower()
-        if "rkp" in b_low or "rpjm" in b_low:
-            topik_fokus.add("rkpdes")
-        if "monev" in b_low or "apbdes" in b_low:
-            topik_fokus.add("monev")
-        if "stunting" in b_low or "ehdw" in b_low:
-            topik_fokus.add("stunting")
-
-    # Susun Narasi Riil
-    narasi = build_real_narrative(info, kunlap_entries, hasil_per_desa, topik_fokus)
-    return info, kunlap_entries, narasi
-
-def build_real_narrative(info, kunlap_entries, hasil_per_desa, topik_fokus):
+    # Susun Narasi Standar
     kec = info["kecamatan"].title()
-    total_hari = len(kunlap_entries)
-    
-    # 1. TUJUAN
-    tujuan_list = [
-        f"Kegiatan pendampingan dan monitoring lapangan selama {total_hari} hari kerja di wilayah Kecamatan {kec} dilaksanakan dalam rangka mendukung tata kelola pemerintahan desa yang akuntabel dan transparan."
-    ]
-    if "rkpdes" in topik_fokus:
-        tujuan_list.append("Pendampingan difokuskan pada fasilitasi penyusunan Rencana Kerja Pemerintah Desa (RKPDes) melalui pencermatan pagu indikatif, penelaahan dokumen RPJM Desa, serta penyusunan skala prioritas kegiatan desa.")
-    if "monev" in topik_fokus:
-        tujuan_list.append("Selain itu, kegiatan bertujuan melaksanakan Monitoring dan Evaluasi (Monev) APBDes guna memastikan kesesuaian antara realisasi serapan anggaran, volume fisik kegiatan (opname), serta kelengkapan SPJ.")
-    if "stunting" in topik_fokus:
-        tujuan_list.append("Pendampingan juga mencakup penguatan pencegahan stunting melalui evaluasi data KPM dan aplikasi eHDW.")
-    tujuan = " ".join(tujuan_list)
+    tujuan = (
+        "Kegiatan pendampingan dan monitoring dilaksanakan dalam rangka mendukung penyelenggaraan pemerintahan "
+        "desa yang efektif, akuntabel, dan sesuai dengan ketentuan peraturan perundang-undangan. Pendampingan difokuskan "
+        "pada fasilitasi penyusunan Rencana Kerja Pemerintah Desa (RKPDes) Tahun Anggaran 2027 melalui pencermatan pagu indikatif, "
+        "penelaahan dokumen RPJM Desa, penyusunan skala prioritas pembangunan, serta penguatan kapasitas Tim Penyusun RKPDes "
+        "agar proses perencanaan desa berjalan partisipatif, terarah, dan sesuai kebutuhan masyarakat.\n\n"
+        f"Selain itu, kegiatan juga bertujuan untuk melaksanakan Monitoring dan Evaluasi (Monev) APBDes Tahap I pada desa-desa "
+        f"di Kecamatan {kec} guna memastikan kesesuaian antara realisasi anggaran, capaian fisik kegiatan, serta kelengkapan "
+        "administrasi pertanggungjawaban. Kegiatan monitoring ini merupakan bagian dari upaya pembinaan dan pengawasan "
+        "terhadap pengelolaan keuangan desa agar pelaksanaan pembangunan desa dapat berjalan secara transparan, akuntabel, dan tepat sasaran."
+    )
 
-    # 2. HASIL KUNJUNGAN (Mengambil intisari riil per desa)
-    hasil_paragraphs = []
-    for desa, desc in list(hasil_per_desa.items())[:6]:  # Ambil sampel desa representatif dari PDF
-        # Ambil maksimal 2 kalimat awal dari output riil agar padat
+    hasil_list = []
+    for desa, desc in list(hasil_per_desa.items())[:3]:
         sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 15]
         ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
-        hasil_paragraphs.append(f"Di Desa {desa}: {ringkasan}")
+        hasil_list.append(f"Hasil pendampingan di Desa {desa} menunjukkan bahwa {ringkasan.lower() if ringkasan.startswith('Ter') else ringkasan}")
     
-    hasil = "\n\n".join(hasil_paragraphs) if hasil_paragraphs else "Pelaksanaan kegiatan lapangan berjalan tertib sesuai agenda kerja."
+    hasil = "\n\n".join(hasil_list) if hasil_list else (
+        "Hasil pendampingan dan monitoring membuktikan bahwa secara umum pelaksanaan kegiatan pembangunan fisik "
+        "telah sesuai dengan dokumen perencanaan dan progres pekerjaan di lapangan. Administrasi pertanggungjawaban "
+        "kegiatan juga telah tersedia dengan cukup baik dengan beberapa catatan penyempurnaan lampiran SPJ."
+    )
 
-    # 3. TINDAK LANJUT
     rtl = (
-        "Sebagai tindak lanjut hasil kunjungan lapangan, Tim Penyusun RKPDes di masing-masing desa diarahkan untuk menuntaskan "
-        "draf dokumen perencanaan berdasarkan pagu indikatif dan prioritas kebutuhan warga. Terhadap hasil evaluasi serapan anggaran "
-        "dan monev fisik, pemerintah desa bersama TPK didorong untuk segera melengkapi kekurangan bukti administrasi SPJ perpajakan "
-        "serta merapikan prasasti proyek sebagai kesiapan pencairan anggaran tahap selanjutnya."
+        "Sebagai tindak lanjut hasil pendampingan penyusunan RKPDes, Tim Penyusun RKPDes di masing-masing desa diarahkan "
+        "untuk melanjutkan proses penyusunan dokumen perencanaan dengan mengacu pada hasil pencermatan RPJM Desa, pagu indikatif, "
+        "serta prioritas kebutuhan masyarakat yang telah disepakati. Pendampingan lanjutan akan dilakukan untuk memastikan dokumen "
+        "RKPDes tersusun sesuai tahapan dan ketentuan yang berlaku.\n\n"
+        "Terhadap hasil evaluasi serapan anggaran, pemerintah desa didorong untuk segera menindaklanjuti berbagai kendala teknis "
+        "yang telah teridentifikasi sehingga pelaksanaan kegiatan pembangunan dan pemberdayaan masyarakat dapat berjalan lebih optimal.\n\n"
+        "Berdasarkan hasil monitoring APBDes Tahap I, pemerintah desa diminta untuk segera melengkapi kekurangan dokumen administrasi "
+        "dan pertanggungjawaban kegiatan, khususnya terkait lampiran SPJ dan dokumen pendukung lainnya."
     )
 
-    # 4. REKOMENDASI
     rekomendasi = (
-        "Pemerintah desa agar terus meningkatkan kualitas perencanaan pembangunan desa berbasis data riil dan musyawarah partisipatif.\n"
-        "Tim Penyusun RKPDes perlu memastikan seluruh usulan kegiatan telah melalui proses verifikasi dan pencermatan RPJM Desa secara cermat.\n"
-        "Pemerintah desa dan TPK agar mempercepat penyelesaian administrasi SPJ belanja serta realisasi fisik yang belum tuntas 100%.\n"
-        "Kelengkapan dokumen administrasi keuangan desa harus terus ditertibkan guna kelancaran evaluasi dan pengajuan tahap berikutnya.\n"
-        "Meningkatkan koordinasi rutin antara pemerintah desa, kecamatan, dan Tenaga Pendamping Profesional demi terwujudnya tata kelola desa yang baik."
+        "Pemerintah desa agar terus meningkatkan kualitas perencanaan pembangunan melalui penyusunan RKPDes yang berbasis data, kebutuhan masyarakat, serta selaras dengan RPJM Desa dan arah kebijakan pembangunan nasional maupun daerah.\n"
+        "Tim Penyusun RKPDes perlu memastikan bahwa seluruh usulan kegiatan yang dimasukkan dalam dokumen perencanaan telah melalui proses verifikasi, pencermatan, dan penetapan skala prioritas secara objektif dan partisipatif.\n"
+        "Pemerintah desa agar mempercepat realisasi kegiatan yang masih belum optimal sehingga target penyerapan anggaran dapat tercapai sesuai jadwal yang telah ditetapkan.\n"
+        "Kelengkapan administrasi dan pertanggungjawaban keuangan desa perlu menjadi perhatian utama, mengingat dokumen tersebut merupakan syarat penting dalam proses pengawasan, audit, maupun pengajuan pencairan anggaran tahap berikutnya.\n"
+        "Hasil monitoring dan evaluasi hendaknya dijadikan bahan pembelajaran dan perbaikan berkelanjutan guna meningkatkan efektivitas pelaksanaan pembangunan desa, kualitas pelayanan kepada masyarakat, serta akuntabilitas pengelolaan keuangan desa.\n"
+        "Pendampingan dan koordinasi antara pemerintah desa, kecamatan, serta tenaga pendamping profesional perlu terus ditingkatkan agar pelaksanaan pembangunan dan pengelolaan pemerintahan desa berjalan sesuai prinsip tata kelola yang baik (good governance)."
     )
 
-    return {
+    narasi = {
         "tujuan": tujuan,
         "hasil": hasil,
         "rtl": rtl,
         "rekomendasi": rekomendasi
     }
+    return info, kunlap_entries, narasi
 
-def create_docx(info, kunlap_entries, custom_text):
-    doc = Document()
-    for s in doc.sections:
-        s.top_margin = Inches(1.0)
-        s.bottom_margin = Inches(1.0)
-        s.left_margin = Inches(1.0)
-        s.right_margin = Inches(1.0)
+# ----------------- GENERATOR PDF RESMI (REPORTLAB) -----------------
+def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=2.5 * cm,
+        rightMargin=2.5 * cm,
+        topMargin=2.5 * cm,
+        bottomMargin=2.5 * cm
+    )
 
-    p_title = doc.add_paragraph()
-    p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r1 = p_title.add_run("LAPORAN KUNJUNGAN LAPANGAN BULANAN\n")
-    r1.bold = True
-    r1.font.size = Pt(12)
-    r2 = p_title.add_run("PENDAMPING DESA\n")
-    r2.bold = True
-    r2.font.size = Pt(12)
-    r3 = p_title.add_run(f"Bulan {info['periode']}\n")
-    r3.bold = True
-    r3.font.size = Pt(12)
+    styles = getSampleStyleSheet()
+    
+    style_title = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=12,
+        leading=16,
+        alignment=TA_CENTER
+    )
+    
+    style_heading = ParagraphStyle(
+        'SectionHeading',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        leading=14,
+        spaceBefore=10,
+        spaceAfter=6
+    )
+    
+    style_body = ParagraphStyle(
+        'BodyJustify',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        spaceAfter=8
+    )
 
-    doc.add_paragraph("Identitas")
-    t_id = doc.add_table(rows=7, cols=3)
-    t_id.alignment = WD_TABLE_ALIGNMENT.CENTER
+    style_bullet = ParagraphStyle(
+        'BulletJustify',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        leftIndent=15,
+        firstLineIndent=-10,
+        spaceAfter=4
+    )
+
+    elements = []
+
+    # Map Nama Jenjang
+    jenjang_map = {
+        "PD": ("PD", "PENDAMPING DESA"),
+        "PLD": ("PLD", "PENDAMPING LOKAL DESA"),
+        "TAPM": ("TAPM", "TENAGA AHLI PEMBERDAYAAN MASYARAKAT")
+    }
+    posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("PD", "PENDAMPING DESA"))
+
+    # Judul Header
+    elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
+    elements.append(Paragraph(jabatan_val, style_title))
+    elements.append(Paragraph(f"Bulan {info['periode']}", style_title))
+    elements.append(Spacer(1, 15))
+
+    # A. Identitas
+    elements.append(Paragraph("A. Identitas", style_heading))
     id_data = [
-        ("N I K", ":", info["nik"]),
-        ("Nama Lengkap", ":", info["nama"]),
-        ("Kecamatan", ":", info["kecamatan"]),
-        ("Kabupaten/Kota", ":", info["kabupaten"]),
-        ("Provinsi", ":", info["provinsi"]),
-        ("Posisi", ":", info["posisi"]),
-        ("Jabatan", ":", "PENDAMPING DESA")
+        [Paragraph("NIK", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["nik"], styles['Normal'])],
+        [Paragraph("Nama Lengkap", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["nama"], styles['Normal'])],
+        [Paragraph("Kecamatan", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["kecamatan"], styles['Normal'])],
+        [Paragraph("Kabupaten/Kota", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["kabupaten"], styles['Normal'])],
+        [Paragraph("Provinsi", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["provinsi"], styles['Normal'])],
+        [Paragraph("Posisi", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(posisi_val, styles['Normal'])],
+        [Paragraph("Jabatan", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(jabatan_val, styles['Normal'])],
     ]
-    for r_idx, (k, col, val) in enumerate(id_data):
-        row = t_id.rows[r_idx]
-        row.cells[0].paragraphs[0].add_run(k)
-        row.cells[1].paragraphs[0].add_run(col)
-        row.cells[2].paragraphs[0].add_run(val)
-        row.cells[0].width = Inches(1.8)
-        row.cells[1].width = Inches(0.2)
-        row.cells[2].width = Inches(4.5)
+    t_id = Table(id_data, colWidths=[3.5 * cm, 0.4 * cm, 12 * cm])
+    t_id.setStyle(TableStyle([
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 1),
+        ('TOPPADDING', (0,0), (-1,-1), 1),
+    ]))
+    elements.append(t_id)
+    elements.append(Spacer(1, 10))
 
-    doc.add_paragraph("\nWaktu Pelaksanaan Kunjungan Lapangan")
-
-    table = doc.add_table(rows=2 + len(kunlap_entries), cols=4)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # B. Waktu Kunjungan Lapangan
+    elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
     
-    h_cells = table.rows[0].cells
-    h_cells[0].text = "Hari ke"
-    h_cells[1].text = "Waktu (Tgl/Bln/Thn)"
-    h_cells[2].text = "Lokasi Kunjungan"
-    h_cells[2].merge(h_cells[3])
+    t_data = [
+        [
+            Paragraph("Hari ke", styles['Normal']),
+            Paragraph("Waktu<br/>(Tgl/Bln/Thn)", styles['Normal']),
+            Paragraph("Lokasi Kunjungan", styles['Normal']),
+            ""
+        ],
+        [
+            Paragraph("1", styles['Normal']),
+            Paragraph("2", styles['Normal']),
+            Paragraph("Kecamatan", styles['Normal']),
+            Paragraph("Desa", styles['Normal'])
+        ]
+    ]
+
+    for idx, e in enumerate(entries):
+        t_data.append([
+            Paragraph(f"Hari ke {idx + 1}", styles['Normal']),
+            Paragraph(e["tanggal"], styles['Normal']),
+            Paragraph(e["kecamatan"], styles['Normal']),
+            Paragraph(e["desa"], styles['Normal'])
+        ])
+
+    # Baris Total Hari di Bawah Tabel
+    t_data.append([
+        "",
+        "",
+        Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {info['periode']} : {len(entries)} Hari</b>", styles['Normal']),
+        ""
+    ])
+
+    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 4.5 * cm, 5.5 * cm], repeatRows=2)
+    t_kunlap.setStyle(TableStyle([
+        ('SPAN', (2, 0), (3, 0)),
+        ('SPAN', (2, -1), (3, -1)),
+        ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -2), 0.5, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(t_kunlap)
+    elements.append(Spacer(1, 12))
+
+    # C. Tujuan
+    elements.append(Paragraph("C. Tujuan Kunjungan Lapangan", style_heading))
+    for p in custom_text["tujuan"].split("\n\n"):
+        if p.strip():
+            elements.append(Paragraph(p.strip(), style_body))
+
+    # D. Hasil
+    elements.append(Paragraph("D. Hasil Kunjungan Lapangan", style_heading))
+    for p in custom_text["hasil"].split("\n\n"):
+        if p.strip():
+            elements.append(Paragraph(p.strip(), style_body))
+
+    # E. Tindak Lanjut
+    elements.append(Paragraph("E. Langkah Tindak Lanjut Penanganan Masalah :", style_heading))
+    for p in custom_text["rtl"].split("\n\n"):
+        if p.strip():
+            elements.append(Paragraph(p.strip(), style_body))
+
+    # F. Rekomendasi
+    elements.append(Paragraph("F. Rekomendasi :", style_heading))
+    for p in custom_text["rekomendasi"].split("\n"):
+        if p.strip():
+            elements.append(Paragraph(f"• {p.strip()}", style_bullet))
+
+    # Area Tanda Tangan
+    elements.append(Spacer(1, 15))
+    sign_block = []
     
-    sub_cells = table.rows[1].cells
-    sub_cells[0].text = "1"
-    sub_cells[1].text = "2"
-    sub_cells[2].text = "Kecamatan"
-    sub_cells[3].text = "Desa"
+    # Format tanggal cetak (contoh: Bojonegoro, 31 Juli 2026)
+    bln_indonesia = [
+        "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ]
+    tgl_cetak_str = f"{info['kabupaten'].title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
     
-    for idx, item in enumerate(kunlap_entries):
-        r_cells = table.rows[2 + idx].cells
-        r_cells[0].text = f"Hari ke {idx + 1}"
-        r_cells[1].text = item["tanggal"]
-        r_cells[2].text = item["kecamatan"]
-        r_cells[3].text = item["desa"]
+    style_sign = ParagraphStyle('SignRight', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14, alignment=TA_RIGHT)
+    style_sign_name = ParagraphStyle('SignName', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, alignment=TA_RIGHT)
 
-    for row in table.rows:
-        for cell in row.cells:
-            tcPr = cell._tc.get_or_add_tcPr()
-            tcBorders = parse_xml(r'''
-                <w:tcBorders {} >
-                    <w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>
-                    <w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>
-                    <w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>
-                    <w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>
-                </w:tcBorders>
-            '''.format(nsdecls('w')))
-            tcPr.append(tcBorders)
+    sign_block.append(Paragraph(tgl_cetak_str, style_sign))
+    sign_block.append(Paragraph("Penyusun Laporan,", style_sign))
+    
+    if ttd_bytes is not None:
+        sign_block.append(Spacer(1, 4))
+        # Tanda tangan gambar
+        img_io = io.BytesIO(ttd_bytes)
+        img = RLImage(img_io, width=4.5 * cm, height=2.2 * cm)
+        img.hAlign = 'RIGHT'
+        sign_block.append(img)
+        sign_block.append(Spacer(1, 4))
+    else:
+        sign_block.append(Spacer(1, 45)) # ruang kosong tanda tangan basah
 
-    p_tot = doc.add_paragraph()
-    p_tot.add_run(f"\nTotal Hari Kunjungan Lapangan Bulan {info['periode']} : {len(kunlap_entries)} Hari").bold = True
+    sign_block.append(Paragraph(f"<u>{info['nama']}</u>", style_sign_name))
+    
+    elements.append(KeepTogether(sign_block))
 
-    doc.add_paragraph("Tujuan Kunjungan Lapangan").runs[0].bold = True
-    p_tujuan = doc.add_paragraph(custom_text["tujuan"])
-    p_tujuan.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
-    doc.add_paragraph("Hasil Kunjungan Lapangan").runs[0].bold = True
-    for part in custom_text["hasil"].split("\n\n"):
-        if part.strip():
-            p_h = doc.add_paragraph(part.strip())
-            p_h.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+# ----------------- ANTARMUKA WEB (STREAMLIT) -----------------
+col_up1, col_up2 = st.columns([1, 1])
+with col_up1:
+    uploaded_pdf = st.file_uploader("1. Unggah PDF DRP Bulanan", type=["pdf"])
+with col_up2:
+    uploaded_ttd = st.file_uploader("2. Unggah Gambar Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-    doc.add_paragraph("Langkah Tindak Lanjut Penanganan Masalah :").runs[0].bold = True
-    p_rtl = doc.add_paragraph(custom_text["rtl"])
-    p_rtl.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+if uploaded_pdf is not None:
+    with st.spinner("Membaca dan memproses PDF DRP..."):
+        info, entries, auto_narrative = parse_drp_pdf(uploaded_pdf)
 
-    doc.add_paragraph("Rekomendasi :").runs[0].bold = True
-    for rek in custom_text["rekomendasi"].split("\n"):
-        if rek.strip():
-            p_rek = doc.add_paragraph(rek.strip(), style='List Bullet')
-            p_rek.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    st.success(f"Berhasil membaca data: **{info['nama']}** | Total Kunjungan: **{len(entries)} Hari**")
 
-    doc.add_paragraph("\n")
-    p_sign = doc.add_paragraph()
-    p_sign.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p_sign.add_run(f"Bojonegoro, 31 {info['periode']}\nPenyusun Laporan,\n\n\n\n\n")
-    r_nama = p_sign.add_run(f"{info['nama']}")
-    r_nama.bold = True
-    r_nama.underline = True
+    # Pengaturan Parameter Dokumen
+    st.markdown("### ⚙️ Pengaturan Cetak Dokumen")
+    c_set1, c_set2 = st.columns(2)
+    with c_set1:
+        jenjang_selected = st.selectbox(
+            "Pilih Jenjang Jabatan:",
+            ["PD", "PLD", "TAPM"],
+            index=0 if info["posisi_raw"].upper() == "PD" else (1 if info["posisi_raw"].upper() == "PLD" else 2)
+        )
+    with c_set2:
+        # Default hari terakhir pada bulan penugasan
+        tahun_val = int(info["tahun_str"]) if info["tahun_str"].isdigit() else 2026
+        bln_dict_rev = {
+            "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
+            "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12
+        }
+        bulan_num = bln_dict_rev.get(info["bulan_str"].lower(), 7)
+        _, last_day = calendar.monthrange(tahun_val, bulan_num)
+        default_date = datetime.date(tahun_val, bulan_num, last_day)
+        
+        tgl_cetak = st.date_input("Pilih Tanggal Cetak Laporan:", default_date)
 
-    bio = io.BytesIO()
-    doc.save(bio)
-    bio.seek(0)
-    return bio
-
-if uploaded_file is not None:
-    with st.spinner("Membaca rincian Output dan Kegiatan tiap desa dari PDF..."):
-        info, entries, auto_narrative = parse_drp_pdf(uploaded_file)
-
-    st.success(f"Laporan diproses untuk: **{info['nama']}** | Terdeteksi **{len(entries)} Hari Kunjungan Lapangan**")
-
+    # Pratinjau Tabel & Narasi
     col1, col2 = st.columns([1, 1])
-
     with col1:
-        st.subheader("📋 Matriks Kunjungan Terdeteksi")
+        st.subheader("📋 Matriks Kunjungan")
         st.dataframe(entries, use_container_width=True)
 
     with col2:
-        st.subheader("📝 Narasi Riil Hasil Ekstraksi PDF")
-        txt_tujuan = st.text_area("Tujuan Kunjungan Lapangan", auto_narrative["tujuan"], height=130)
-        txt_hasil = st.text_area("Hasil Kunjungan Lapangan (Otomatis per Desa)", auto_narrative["hasil"], height=200)
-        txt_rtl = st.text_area("Langkah Tindak Lanjut", auto_narrative["rtl"], height=120)
-        txt_rek = st.text_area("Rekomendasi", auto_narrative["rekomendasi"], height=140)
+        st.subheader("📝 Narasi Laporan (Bisa Disesuaikan)")
+        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", auto_narrative["tujuan"], height=130)
+        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", auto_narrative["hasil"], height=160)
+        txt_rtl = st.text_area("E. Langkah Tindak Lanjut", auto_narrative["rtl"], height=110)
+        txt_rek = st.text_area("F. Rekomendasi (Pisahkan Baris)", auto_narrative["rekomendasi"], height=140)
 
     custom_text = {
         "tujuan": txt_tujuan,
@@ -288,13 +421,18 @@ if uploaded_file is not None:
         "rekomendasi": txt_rek
     }
 
-    docx_bytes = create_docx(info, entries, custom_text)
+    ttd_bytes = uploaded_ttd.read() if uploaded_ttd is not None else None
+
+    # Generate PDF
+    pdf_output = generate_pdf_report(
+        info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
+    )
 
     st.markdown("---")
     st.download_button(
-        label="📥 Unduh Dokumen KUNLAP (.docx)",
-        data=docx_bytes,
-        file_name=f"KUNLAP_{info['nama']}_{info['periode']}.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        label="📥 Unduh Laporan KUNLAP Resmi (.pdf)",
+        data=pdf_output,
+        file_name=f"KUNLAP_{jenjang_selected}_{info['nama']}_{info['bulan_str']}_{info['tahun_str']}.pdf",
+        mime="application/pdf",
         type="primary"
     )
