@@ -7,6 +7,7 @@ import io
 import html
 from PIL import Image
 
+# ReportLab untuk membuat PDF murni
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
@@ -16,6 +17,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT, TA_LEFT
 
+# Konfigurasi Halaman Responsif
 st.set_page_config(
     page_title="KUNLAP Generator - Kemendesa",
     page_icon="📋",
@@ -23,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- INJEKSI CSS MODERN & RESPONSIF -----------------
+# ----------------- INJEKSI CSS MODERN & RESPONSIF HP -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -109,7 +111,7 @@ with col_up1:
 with col_up2:
     uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-# ----------------- LOGIKA EKSTRAKSI PRESISI -----------------
+# ----------------- FUNGSI PARSER PDF -----------------
 def clean_word(txt):
     if not txt:
         return ""
@@ -132,7 +134,7 @@ def parse_drp_pdf(pdf_bytes):
         if txt:
             full_text += txt + "\n"
 
-    # 1. Ekstraksi Identitas
+    # Ekstraksi Identitas
     def extract_field(pattern, text):
         m = re.search(pattern, text, flags=re.IGNORECASE)
         if m:
@@ -166,7 +168,7 @@ def parse_drp_pdf(pdf_bytes):
         "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # 2. Parsing Tabel Kunjungan Lapangan
+    # Ekstraksi Blok Kunjungan Lapangan
     kunlap_pattern = re.compile(
         r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\).*?Lokasi:\s*([^\n\r]+)(.*?)(?=(?:Deskripsi kegiatan:|\Z|DATA CUTI))",
         re.DOTALL
@@ -182,18 +184,11 @@ def parse_drp_pdf(pdf_bytes):
         "september": "09", "oktober": "10", "november": "11", "desember": "12"
     }
 
-    # Pola deteksi tanggal di dalam blok teks maupun tabel atas
-    date_candidates = re.findall(r"[\$]?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})[\$]?", full_text)
-    date_kunlap_list = []
-    for d, m_num, y in date_candidates:
-        d_clean = str(int(d))
-        m_clean = m_num.zfill(2)
-        y_clean = "20" + y if len(y) == 2 else y
-        # Simpan jika sesuai bulan penugasan
-        date_kunlap_list.append(f"{d_clean}-{m_clean}-{y_clean}")
-
-    # Ambil tanggal-tanggal kunlap dari baris DAFTAR LAPORAN KUNJUNGAN LAPANGAN
-    kunlap_section_match = re.search(r"DAFTAR LAPORAN KUNJUNGAN LAPANGAN(.*?)(?:Total Laporan Kunjungan Lapangan|DATA CUTI)", full_text, re.DOTALL)
+    kunlap_section_match = re.search(
+        r"DAFTAR LAPORAN KUNJUNGAN LAPANGAN(.*?)(?:Total Laporan Kunjungan Lapangan|DATA CUTI)", 
+        full_text, 
+        re.DOTALL
+    )
     if kunlap_section_match:
         dates_in_sec = re.findall(r"[\$]?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})[\$]?", kunlap_section_match.group(1))
         kunlap_dates = [f"{int(d)}-{m_num.zfill(2)}-{'20'+y if len(y)==2 else y}" for d, m_num, y in dates_in_sec]
@@ -213,11 +208,9 @@ def parse_drp_pdf(pdf_bytes):
         parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
         desa = parts[-1].title() if parts else "Desa Dampingan"
 
-        # Tentukan tanggal yang tepat
         if idx < len(kunlap_dates):
             tgl_formatted = kunlap_dates[idx]
         else:
-            # Cari dari body
             b_date = re.search(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", body)
             if b_date:
                 bln_code = bulan_dict.get(b_date.group(2).lower(), "10")
@@ -245,11 +238,10 @@ def parse_drp_pdf(pdf_bytes):
         if "perlinsos" in b_low or "bansos" in b_low:
             topik_ditemukan["perlinsos"].add(desa)
 
-        # Tangkap Hasil / Output Riil (baik dengan label 'Hasil:' maupun 'Output/Hasil:')
+        # Tangkap Output / Hasil Riil
         res_m = re.search(r"(?:Output/Hasil|Hasil)\s*:\s*(.+?)(?=(?:Tindak Lanjut|Pukul|\Z))", body, re.DOTALL)
         if res_m:
             c_res = re.sub(r"\s+", " ", res_m.group(1)).strip()
-            # Bersihkan angka desimal jam atau nomor jika ada
             c_res = re.sub(r"^\d+\.\s*", "", c_res)
             if desa not in hasil_per_desa and len(c_res) > 20:
                 hasil_per_desa[desa] = c_res
@@ -257,7 +249,7 @@ def parse_drp_pdf(pdf_bytes):
     kec = info["kecamatan"].title()
     total_hari = len(kunlap_entries)
     
-    # 3. Narasi Tujuan Dinamis
+    # 1. Tujuan
     tujuan_paras = [
         f"Kegiatan pendampingan dan monitoring lapangan selama {total_hari} hari kerja pada periode {info['periode']} "
         f"di wilayah Kecamatan {kec} dilaksanakan dalam rangka mendukung efektivitas tata kelola pemerintahan desa, akuntabilitas pengelolaan anggaran desa, serta kepatuhan terhadap peraturan perundang-undangan."
@@ -282,12 +274,13 @@ def parse_drp_pdf(pdf_bytes):
         )
     tujuan = "\n\n".join(tujuan_paras)
 
-    # 4. Narasi Hasil Riil dari Berkas
+    # 2. Hasil Riil (Aman dari Titik Rupiah / Angka)
     hasil_list = []
     for desa, desc in list(hasil_per_desa.items())[:4]:
-        # Ambil 1-2 kalimat awal
-        sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 20]
-        ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
+        # Memisahkan kalimat dengan mengabaikan titik di antara angka/nominal uang
+        sentences = re.split(r'(?<!\d)\.(?!\d)\s*', desc)
+        valid_sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
+        ringkasan = ". ".join(valid_sentences[:2]) + "." if valid_sentences else desc
         hasil_list.append(f"Di Desa {desa}, {ringkasan}")
     
     hasil = "\n\n".join(hasil_list) if hasil_list else (
@@ -295,7 +288,7 @@ def parse_drp_pdf(pdf_bytes):
         "serta monitoring realisasi fisik Dana Desa dan penginputan data eHDW di seluruh desa dampingan secara tertib."
     )
 
-    # 5. Narasi Tindak Lanjut
+    # 3. Tindak Lanjut
     rtl = (
         "Pemerintah desa diarahkan untuk segera menuntaskan Peraturan Desa tentang Perubahan APBDes TA 2026 "
         "dan menginputkannya ke aplikasi Siskeudes Online. Terhadap persiapan TA 2027, Tim Penyusun diminta menyelesaikan "
@@ -303,7 +296,7 @@ def parse_drp_pdf(pdf_bytes):
         "menerbitkan surat tugas kader untuk pembelajaran eHDW Learning serta melengkapi dokumen registrasi Badan Hukum BUM Desa."
     )
 
-    # 6. Narasi Rekomendasi
+    # 4. Rekomendasi
     rekomendasi = (
         "Pemerintah desa agar mempercepat penetapan Perdes Perubahan APBDes TA 2026 guna optimalisasi penyerapan anggaran.\n"
         "Penyusunan APBDes TA 2027 wajib memprioritaskan belanja mandatory seperti stunting, ketahanan pangan, dan BLT Desa.\n"
@@ -320,7 +313,7 @@ def parse_drp_pdf(pdf_bytes):
     }
     return info, kunlap_entries, narasi
 
-# ----------------- GENERATOR PDF RESMI REPORTLAB -----------------
+# ----------------- GENERATOR PDF RESMI (REPORTLAB) -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -359,12 +352,13 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     }
     posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("PD", "PENDAMPING DESA"))
 
+    # Judul Dokumen
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
     elements.append(Spacer(1, 10))
 
-    # A. Identitas Rapi (Titik Dua Lurus)
+    # A. Identitas
     elements.append(Paragraph("A. Identitas", style_heading))
     id_data = [
         [Paragraph("NIK", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nik"]), style_cell)],
@@ -385,9 +379,8 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     elements.append(t_id)
     elements.append(Spacer(1, 6))
 
-    # B. Waktu Pelaksanaan Kunjungan Lapangan (Tabel Presisi)
+    # B. Waktu Pelaksanaan Kunjungan Lapangan
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
-    
     t_data = [
         [
             Paragraph("Hari ke", style_cell_bold),
@@ -423,6 +416,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -2), 0.5, colors.black),
+        ('BOX', (0, 0), (-1, -2), 0.5, colors.black),
         ('BOX', (0, -1), (-1, -1), 0.5, colors.black),
         ('TOPPADDING', (0, 0), (-1, -1), 2.5),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
