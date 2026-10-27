@@ -28,44 +28,40 @@ st.set_page_config(
 # ----------------- INJEKSI CSS MODERN & MOBILE FRIENDLY -----------------
 st.markdown("""
 <style>
-    /* Global Styling */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
     }
     
-    /* Header Card */
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
         color: white;
         padding: 24px 20px;
         border-radius: 16px;
-        margin-bottom: 24px;
+        margin-bottom: 20px;
         box-shadow: 0 4px 15px rgba(37, 99, 235, 0.2);
     }
     .header-card h2 {
         color: white !important;
-        margin: 0 0 8px 0;
+        margin: 0 0 6px 0;
         font-weight: 700;
-        font-size: 1.5rem;
+        font-size: 1.4rem;
     }
     .header-card p {
         color: #E0E7FF !important;
         margin: 0;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         line-height: 1.4;
     }
 
-    /* Form Container / Box */
     .stFileUploader, .stSelectbox, .stDateInput, .stTextArea {
         background: #F8FAFC;
-        padding: 12px;
+        padding: 10px;
         border-radius: 12px;
         border: 1px solid #E2E8F0;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
     }
 
-    /* Tombol Utama Ramah Sentuhan HP */
     .stButton > button {
         width: 100%;
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
@@ -83,13 +79,12 @@ st.markdown("""
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
 
-    /* Penyesuaian khusus Layar Ponsel (Responsive) */
     @media (max-width: 768px) {
         .header-card {
-            padding: 18px 16px;
+            padding: 16px;
         }
         .header-card h2 {
-            font-size: 1.25rem;
+            font-size: 1.2rem;
         }
         .header-card p {
             font-size: 0.85rem;
@@ -97,19 +92,40 @@ st.markdown("""
         .block-container {
             padding-left: 1rem !important;
             padding-right: 1rem !important;
-            padding-top: 1.5rem !important;
+            padding-top: 1rem !important;
         }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ----------------- TAMPILAN HEADER -----------------
 st.markdown("""
 <div class="header-card">
     <h2>📋 Generator Laporan KUNLAP</h2>
-    <p>Ubah berkas PDF Daily Report (DRP) menjadi dokumen Kunjungan Lapangan resmi siap cetak dalam hitungan detik.</p>
+    <p>Pilih jenjang, tanggal cetak, dan unggah berkas DRP untuk membuat dokumen PDF resmi siap cetak.</p>
 </div>
 """, unsafe_allow_html=True)
+
+# ----------------- LANGKAH 1: PARAMETER CETAK TERLEBIH DAHULU -----------------
+st.markdown("##### ⚙️ Langkah 1: Pengaturan Awal")
+c_set1, c_set2 = st.columns(2)
+with c_set1:
+    jenjang_selected = st.selectbox(
+        "Jenjang Jabatan:",
+        ["PD", "PLD", "TAPM"],
+        index=0
+    )
+with c_set2:
+    # Tanggal default hari ini
+    today = datetime.date.today()
+    tgl_cetak = st.date_input("Tanggal Cetak Dokumen:", today)
+
+# ----------------- LANGKAH 2: UNGGAH BERKAS -----------------
+st.markdown("##### 📁 Langkah 2: Unggah Berkas")
+col_up1, col_up2 = st.columns(2)
+with col_up1:
+    uploaded_pdf = st.file_uploader("PDF DRP Bulanan", type=["pdf"])
+with col_up2:
+    uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
 # ----------------- FUNGSI EKSTRAKSI DATA PDF -----------------
 def clean_word(txt):
@@ -137,7 +153,6 @@ def parse_drp_pdf(pdf_file):
     kec_m = re.search(r"Kecamatan\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Desa))", full_text)
     kab_m = re.search(r"Kabupaten/Kota\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kecamatan))", full_text)
     prov_m = re.search(r"Provinsi\s*:\s*([A-Za-z\s]+?)(?=(?:\n|Kabupaten))", full_text)
-    pos_m = re.search(r"Posisi\s*:\s*([A-Za-z0-9]+)", full_text)
     
     per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text)
     if per_m:
@@ -153,7 +168,6 @@ def parse_drp_pdf(pdf_file):
         "kecamatan": clean_word(kec_m.group(1)) if kec_m else "BALEN",
         "kabupaten": clean_word(kab_m.group(1)) if kab_m else "BOJONEGORO",
         "provinsi": clean_word(prov_m.group(1)) if prov_m else "JAWA TIMUR",
-        "posisi_raw": clean_word(pos_m.group(1)) if pos_m else "PD",
         "bulan_str": bln_txt,
         "tahun_str": thn_txt,
         "periode": f"{bln_txt} Tahun {thn_txt}"
@@ -301,71 +315,20 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     styles = getSampleStyleSheet()
     
     style_title = ParagraphStyle(
-        'DocTitle',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=11,
-        leading=15,
-        alignment=TA_CENTER
+        'DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER
     )
-    
     style_heading = ParagraphStyle(
-        'SectionHeading',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=10,
-        leading=14,
-        spaceBefore=8,
-        spaceAfter=4
+        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=8, spaceAfter=4
     )
-    
     style_body = ParagraphStyle(
-        'BodyJustify',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9.5,
-        leading=13.5,
-        alignment=TA_JUSTIFY,
-        spaceAfter=6
+        'BodyJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY, spaceAfter=6
     )
-
     style_bullet = ParagraphStyle(
-        'BulletJustify',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9.5,
-        leading=13.5,
-        alignment=TA_JUSTIFY,
-        leftIndent=15,
-        firstLineIndent=-10,
-        spaceAfter=4
+        'BulletJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-10, spaceAfter=4
     )
-
-    style_cell = ParagraphStyle(
-        'TableCell',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9,
-        leading=12
-    )
-
-    style_cell_center = ParagraphStyle(
-        'TableCellCenter',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9,
-        leading=12,
-        alignment=TA_CENTER
-    )
-
-    style_cell_bold = ParagraphStyle(
-        'TableCellBold',
-        parent=styles['Normal'],
-        fontName='Helvetica-Bold',
-        fontSize=9,
-        leading=12,
-        alignment=TA_CENTER
-    )
+    style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12)
+    style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12, alignment=TA_CENTER)
+    style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=TA_CENTER)
 
     elements = []
 
@@ -404,7 +367,6 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
 
     # B. Waktu Pelaksanaan Kunjungan Lapangan
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
-    
     t_data = [
         [
             Paragraph("Hari ke", style_cell_bold),
@@ -430,9 +392,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
 
     t_data.append([
         Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {safe_text(info['periode'])} : {len(entries)} Hari</b>", style_cell_bold),
-        "",
-        "",
-        ""
+        "", "", ""
     ])
 
     t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.0 * cm, 6.0 * cm], repeatRows=2)
@@ -503,42 +463,13 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     buffer.seek(0)
     return buffer
 
-# ----------------- ANTARMUKA STREAMLIT RESPONSIVE -----------------
-# Kotak Unggah Berkas
-st.markdown("##### 📁 Langkah 1: Unggah Berkas")
-col_up1, col_up2 = st.columns(2)
-with col_up1:
-    uploaded_pdf = st.file_uploader("PDF DRP Bulanan", type=["pdf"])
-with col_up2:
-    uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
-
+# ----------------- LANGKAH 3: PRATINJAU & EKSEKUSI CETAK -----------------
 if uploaded_pdf is not None:
     with st.spinner("Memproses data laporan..."):
         info, entries, auto_narrative = parse_drp_pdf(uploaded_pdf)
 
     st.success(f"✅ Data Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
 
-    # Pengaturan Cetak
-    st.markdown("##### ⚙️ Langkah 2: Parameter Cetak")
-    c_set1, c_set2 = st.columns(2)
-    with c_set1:
-        jenjang_selected = st.selectbox(
-            "Jenjang Jabatan:",
-            ["PD", "PLD", "TAPM"],
-            index=0 if info["posisi_raw"].upper() == "PD" else (1 if info["posisi_raw"].upper() == "PLD" else 2)
-        )
-    with c_set2:
-        tahun_val = int(info["tahun_str"]) if info["tahun_str"].isdigit() else 2026
-        bln_dict_rev = {
-            "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
-            "juli": 7, "agustus": 8, "september": 9, "oktober": 10, "november": 11, "desember": 12
-        }
-        bulan_num = bln_dict_rev.get(info["bulan_str"].lower(), 7)
-        _, last_day = calendar.monthrange(tahun_val, bulan_num)
-        default_date = datetime.date(tahun_val, bulan_num, last_day)
-        tgl_cetak = st.date_input("Tanggal Cetak Dokumen:", default_date)
-
-    # Pratinjau Tabel dan Teks
     st.markdown("##### 📝 Langkah 3: Pratinjau & Penyesuaian")
     tab1, tab2 = st.tabs(["📋 Matriks Kunjungan", "✍️ Narasi Laporan"])
     
@@ -560,7 +491,6 @@ if uploaded_pdf is not None:
 
     ttd_bytes = uploaded_ttd.read() if uploaded_ttd is not None else None
 
-    # Tombol Eksekusi
     st.markdown("---")
     if st.button("🚀 Buat Dokumen PDF KUNLAP", type="primary"):
         with st.spinner("Menyusun PDF resmi..."):
