@@ -26,6 +26,7 @@ st.set_page_config(
 )
 
 # ----------------- INJEKSI CSS MODERN & MOBILE FRIENDLY -----------------
+# ----------------- INJEKSI CSS ADAPTIF (KOMPATIBEL DARK & LIGHT MODE) -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,62 +34,54 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
     
+    /* Header Card */
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
-        color: white;
-        padding: 24px 20px;
-        border-radius: 16px;
+        color: #FFFFFF !important;
+        padding: 20px 16px;
+        border-radius: 14px;
         margin-bottom: 20px;
-        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.2);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
     }
     .header-card h2 {
-        color: white !important;
+        color: #FFFFFF !important;
         margin: 0 0 6px 0;
         font-weight: 700;
-        font-size: 1.4rem;
+        font-size: 1.35rem;
     }
     .header-card p {
         color: #E0E7FF !important;
         margin: 0;
-        font-size: 0.9rem;
+        font-size: 0.88rem;
         line-height: 1.4;
     }
 
+    /* Hilangkan background putih yang bikin belang di Dark Mode */
     .stFileUploader, .stSelectbox, .stDateInput, .stTextArea {
-        background: #F8FAFC;
-        padding: 10px;
-        border-radius: 12px;
-        border: 1px solid #E2E8F0;
-        margin-bottom: 10px;
+        background: transparent !important;
+        padding: 0 !important;
+        border: none !important;
+        margin-bottom: 14px;
     }
 
+    /* Tombol Utama Lebar & Nyaman di Layar HP */
     .stButton > button {
         width: 100%;
-        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
-        color: white;
+        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+        color: #FFFFFF !important;
         font-weight: 600;
-        padding: 12px 24px;
+        padding: 12px 20px;
         border-radius: 12px;
         border: none;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-        transition: all 0.2s ease;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
         font-size: 1rem;
     }
     .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+        opacity: 0.95;
     }
 
+    /* Khusus Tampilan Layar HP */
     @media (max-width: 768px) {
-        .header-card {
-            padding: 16px;
-        }
-        .header-card h2 {
-            font-size: 1.2rem;
-        }
-        .header-card p {
-            font-size: 0.85rem;
-        }
         .block-container {
             padding-left: 1rem !important;
             padding-right: 1rem !important;
