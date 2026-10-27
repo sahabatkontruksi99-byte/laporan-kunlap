@@ -4,6 +4,7 @@ import re
 import datetime
 import calendar
 import io
+import html
 from PIL import Image
 
 # ReportLab untuk membuat PDF murni
@@ -19,7 +20,7 @@ from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT, TA_LEFT
 st.set_page_config(page_title="Generator Laporan KUNLAP", page_icon="📄", layout="wide")
 
 st.title("📄 Generator Laporan Kunjungan Lapangan (KUNLAP)")
-st.caption("Unggah PDF DRP bulanan, pilih jenjang, tanggal cetak, dan tanda tangan untuk mengunduh PDF resmi.")
+st.caption("Unggah PDF DRP bulanan, tentukan jenjang, tanggal cetak, dan tanda tangan digital.")
 
 # ----------------- FUNGSI EKSTRAKSI DATA PDF -----------------
 def clean_word(txt):
@@ -28,6 +29,11 @@ def clean_word(txt):
     for junk in ["IDENTITAS", "TPP", "LOKASI", "PENUGASAN", "Nama", "NIK", "Posisi", "Jabatan", "Desa", "Kecamatan", "Kabupaten", "Provinsi"]:
         txt = re.sub(rf"\b{junk}\b", "", txt, flags=re.IGNORECASE)
     return txt.strip(": -")
+
+def safe_text(txt):
+    if not txt:
+        return ""
+    return html.escape(str(txt).strip())
 
 def parse_drp_pdf(pdf_file):
     reader = PdfReader(pdf_file)
@@ -65,7 +71,7 @@ def parse_drp_pdf(pdf_file):
         "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # Parsing Entri Kunjungan Lapangan
+    # Parsing Kunjungan Lapangan
     blocks = re.split(r"Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)", full_text)
     kunlap_entries = []
     hasil_per_desa = {}
@@ -114,7 +120,6 @@ def parse_drp_pdf(pdf_file):
             if desa not in hasil_per_desa and clean_output:
                 hasil_per_desa[desa] = clean_output
 
-    # Susun Narasi Standar
     kec = info["kecamatan"].title()
     tujuan = (
         "Kegiatan pendampingan dan monitoring dilaksanakan dalam rangka mendukung penyelenggaraan pemerintahan "
@@ -129,7 +134,7 @@ def parse_drp_pdf(pdf_file):
     )
 
     hasil_list = []
-    for desa, desc in list(hasil_per_desa.items())[:3]:
+    for desa, desc in list(hasil_desa.items())[:3]:
         sentences = [s.strip() for s in desc.split(".") if len(s.strip()) > 15]
         ringkasan = ". ".join(sentences[:2]) + "." if sentences else desc
         hasil_list.append(f"Hasil pendampingan di Desa {desa} menunjukkan bahwa {ringkasan.lower() if ringkasan.startswith('Ter') else ringkasan}")
@@ -168,16 +173,17 @@ def parse_drp_pdf(pdf_file):
     }
     return info, kunlap_entries, narasi
 
-# ----------------- GENERATOR PDF RESMI (REPORTLAB) -----------------
+# ----------------- GENERATOR PDF RESMI -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
+    # Lebar kertas A4 = 21 cm. Margin 2.0 cm kiri-kanan -> lebar efektif konten = 17.0 cm
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=2.5 * cm,
-        rightMargin=2.5 * cm,
-        topMargin=2.5 * cm,
-        bottomMargin=2.5 * cm
+        leftMargin=2.0 * cm,
+        rightMargin=2.0 * cm,
+        topMargin=2.0 * cm,
+        bottomMargin=2.0 * cm
     )
 
     styles = getSampleStyleSheet()
@@ -186,8 +192,8 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         'DocTitle',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=12,
-        leading=16,
+        fontSize=11,
+        leading=15,
         alignment=TA_CENTER
     )
     
@@ -195,37 +201,63 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         'SectionHeading',
         parent=styles['Normal'],
         fontName='Helvetica-Bold',
-        fontSize=11,
+        fontSize=10,
         leading=14,
-        spaceBefore=10,
-        spaceAfter=6
+        spaceBefore=8,
+        spaceAfter=4
     )
     
     style_body = ParagraphStyle(
         'BodyJustify',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=10,
-        leading=14,
+        fontSize=9.5,
+        leading=13.5,
         alignment=TA_JUSTIFY,
-        spaceAfter=8
+        spaceAfter=6
     )
 
     style_bullet = ParagraphStyle(
         'BulletJustify',
         parent=styles['Normal'],
         fontName='Helvetica',
-        fontSize=10,
-        leading=14,
+        fontSize=9.5,
+        leading=13.5,
         alignment=TA_JUSTIFY,
         leftIndent=15,
         firstLineIndent=-10,
         spaceAfter=4
     )
 
+    style_cell = ParagraphStyle(
+        'TableCell',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        leading=12
+    )
+
+    style_cell_center = ParagraphStyle(
+        'TableCellCenter',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=9,
+        leading=12,
+        alignment=TA_CENTER
+    )
+
+    style_cell_bold = ParagraphStyle(
+        'TableCellBold',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=9,
+        leading=12,
+        alignment=TA_CENTER
+    )
+
     elements = []
 
-    # Map Nama Jenjang
+    # Map Jabatan
     jenjang_map = {
         "PD": ("PD", "PENDAMPING DESA"),
         "PLD": ("PLD", "PENDAMPING LOKAL DESA"),
@@ -236,137 +268,137 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     # Judul Header
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
-    elements.append(Paragraph(f"Bulan {info['periode']}", style_title))
-    elements.append(Spacer(1, 15))
+    elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
+    elements.append(Spacer(1, 10))
 
     # A. Identitas
     elements.append(Paragraph("A. Identitas", style_heading))
     id_data = [
-        [Paragraph("NIK", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["nik"], styles['Normal'])],
-        [Paragraph("Nama Lengkap", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["nama"], styles['Normal'])],
-        [Paragraph("Kecamatan", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["kecamatan"], styles['Normal'])],
-        [Paragraph("Kabupaten/Kota", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["kabupaten"], styles['Normal'])],
-        [Paragraph("Provinsi", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(info["provinsi"], styles['Normal'])],
-        [Paragraph("Posisi", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(posisi_val, styles['Normal'])],
-        [Paragraph("Jabatan", styles['Normal']), Paragraph(":", styles['Normal']), Paragraph(jabatan_val, styles['Normal'])],
+        [Paragraph("NIK", style_cell), Paragraph(":", style_cell), Paragraph(safe_text(info["nik"]), style_cell)],
+        [Paragraph("Nama Lengkap", style_cell), Paragraph(":", style_cell), Paragraph(safe_text(info["nama"]), style_cell)],
+        [Paragraph("Kecamatan", style_cell), Paragraph(":", style_cell), Paragraph(safe_text(info["kecamatan"]), style_cell)],
+        [Paragraph("Kabupaten/Kota", style_cell), Paragraph(":", style_cell), Paragraph(safe_text(info["kabupaten"]), style_cell)],
+        [Paragraph("Provinsi", style_cell), Paragraph(":", style_cell), Paragraph(safe_text(info["provinsi"]), style_cell)],
+        [Paragraph("Posisi", style_cell), Paragraph(":", style_cell), Paragraph(posisi_val, style_cell)],
+        [Paragraph("Jabatan", style_cell), Paragraph(":", style_cell), Paragraph(jabatan_val, style_cell)],
     ]
-    t_id = Table(id_data, colWidths=[3.5 * cm, 0.4 * cm, 12 * cm])
+    # Total lebar = 3.2 + 0.3 + 13.5 = 17.0 cm (pas dengan margin)
+    t_id = Table(id_data, colWidths=[3.2 * cm, 0.3 * cm, 13.5 * cm])
     t_id.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 1),
         ('TOPPADDING', (0,0), (-1,-1), 1),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
     ]))
     elements.append(t_id)
-    elements.append(Spacer(1, 10))
+    elements.append(Spacer(1, 6))
 
-    # B. Waktu Kunjungan Lapangan
+    # B. Waktu Pelaksanaan Kunjungan Lapangan
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
     
     t_data = [
         [
-            Paragraph("Hari ke", styles['Normal']),
-            Paragraph("Waktu<br/>(Tgl/Bln/Thn)", styles['Normal']),
-            Paragraph("Lokasi Kunjungan", styles['Normal']),
+            Paragraph("Hari ke", style_cell_bold),
+            Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold),
+            Paragraph("Lokasi Kunjungan", style_cell_bold),
             ""
         ],
         [
-            Paragraph("1", styles['Normal']),
-            Paragraph("2", styles['Normal']),
-            Paragraph("Kecamatan", styles['Normal']),
-            Paragraph("Desa", styles['Normal'])
+            Paragraph("1", style_cell_center),
+            Paragraph("2", style_cell_center),
+            Paragraph("Kecamatan", style_cell_center),
+            Paragraph("Desa", style_cell_center)
         ]
     ]
 
     for idx, e in enumerate(entries):
         t_data.append([
-            Paragraph(f"Hari ke {idx + 1}", styles['Normal']),
-            Paragraph(e["tanggal"], styles['Normal']),
-            Paragraph(e["kecamatan"], styles['Normal']),
-            Paragraph(e["desa"], styles['Normal'])
+            Paragraph(f"Hari ke {idx + 1}", style_cell_center),
+            Paragraph(safe_text(e["tanggal"]), style_cell_center),
+            Paragraph(safe_text(e["kecamatan"]), style_cell_center),
+            Paragraph(safe_text(e["desa"]), style_cell_center)
         ])
 
-    # Baris Total Hari di Bawah Tabel
     t_data.append([
+        Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {safe_text(info['periode'])} : {len(entries)} Hari</b>", style_cell_bold),
         "",
         "",
-        Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {info['periode']} : {len(entries)} Hari</b>", styles['Normal']),
         ""
     ])
 
-    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 4.5 * cm, 5.5 * cm], repeatRows=2)
+    # Total lebar kolom = 2.5 + 3.5 + 5.0 + 6.0 = 17.0 cm
+    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.0 * cm, 6.0 * cm], repeatRows=2)
     t_kunlap.setStyle(TableStyle([
         ('SPAN', (2, 0), (3, 0)),
-        ('SPAN', (2, -1), (3, -1)),
+        ('SPAN', (0, -1), (3, -1)),
         ('ALIGN', (0, 0), (-1, 1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -2), 0.5, colors.black),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('BOX', (0, -1), (-1, -1), 0.5, colors.black),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
     ]))
     elements.append(t_kunlap)
-    elements.append(Spacer(1, 12))
+    elements.append(Spacer(1, 10))
 
     # C. Tujuan
     elements.append(Paragraph("C. Tujuan Kunjungan Lapangan", style_heading))
     for p in custom_text["tujuan"].split("\n\n"):
         if p.strip():
-            elements.append(Paragraph(p.strip(), style_body))
+            elements.append(Paragraph(safe_text(p.strip()), style_body))
 
     # D. Hasil
     elements.append(Paragraph("D. Hasil Kunjungan Lapangan", style_heading))
     for p in custom_text["hasil"].split("\n\n"):
         if p.strip():
-            elements.append(Paragraph(p.strip(), style_body))
+            elements.append(Paragraph(safe_text(p.strip()), style_body))
 
     # E. Tindak Lanjut
     elements.append(Paragraph("E. Langkah Tindak Lanjut Penanganan Masalah :", style_heading))
     for p in custom_text["rtl"].split("\n\n"):
         if p.strip():
-            elements.append(Paragraph(p.strip(), style_body))
+            elements.append(Paragraph(safe_text(p.strip()), style_body))
 
     # F. Rekomendasi
     elements.append(Paragraph("F. Rekomendasi :", style_heading))
     for p in custom_text["rekomendasi"].split("\n"):
         if p.strip():
-            elements.append(Paragraph(f"• {p.strip()}", style_bullet))
+            elements.append(Paragraph(f"• {safe_text(p.strip())}", style_bullet))
 
-    # Area Tanda Tangan
-    elements.append(Spacer(1, 15))
+    # Tanda Tangan
+    elements.append(Spacer(1, 12))
     sign_block = []
     
-    # Format tanggal cetak (contoh: Bojonegoro, 31 Juli 2026)
     bln_indonesia = [
         "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
         "Juli", "Agustus", "September", "Oktober", "November", "Desember"
     ]
-    tgl_cetak_str = f"{info['kabupaten'].title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
+    tgl_cetak_str = f"{safe_text(info['kabupaten']).title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
     
-    style_sign = ParagraphStyle('SignRight', parent=styles['Normal'], fontName='Helvetica', fontSize=10, leading=14, alignment=TA_RIGHT)
-    style_sign_name = ParagraphStyle('SignName', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, alignment=TA_RIGHT)
+    style_sign = ParagraphStyle('SignRight', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_RIGHT)
+    style_sign_name = ParagraphStyle('SignName', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=13.5, alignment=TA_RIGHT)
 
     sign_block.append(Paragraph(tgl_cetak_str, style_sign))
     sign_block.append(Paragraph("Penyusun Laporan,", style_sign))
     
     if ttd_bytes is not None:
         sign_block.append(Spacer(1, 4))
-        # Tanda tangan gambar
         img_io = io.BytesIO(ttd_bytes)
-        img = RLImage(img_io, width=4.5 * cm, height=2.2 * cm)
+        img = RLImage(img_io, width=4.0 * cm, height=2.0 * cm)
         img.hAlign = 'RIGHT'
         sign_block.append(img)
         sign_block.append(Spacer(1, 4))
     else:
-        sign_block.append(Spacer(1, 45)) # ruang kosong tanda tangan basah
+        sign_block.append(Spacer(1, 40))
 
-    sign_block.append(Paragraph(f"<u>{info['nama']}</u>", style_sign_name))
-    
+    sign_block.append(Paragraph(f"<u>{safe_text(info['nama'])}</u>", style_sign_name))
     elements.append(KeepTogether(sign_block))
 
     doc.build(elements)
     buffer.seek(0)
     return buffer
 
-# ----------------- ANTARMUKA WEB (STREAMLIT) -----------------
+# ----------------- ANTARMUKA STREAMLIT -----------------
 col_up1, col_up2 = st.columns([1, 1])
 with col_up1:
     uploaded_pdf = st.file_uploader("1. Unggah PDF DRP Bulanan", type=["pdf"])
@@ -374,12 +406,11 @@ with col_up2:
     uploaded_ttd = st.file_uploader("2. Unggah Gambar Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
 if uploaded_pdf is not None:
-    with st.spinner("Membaca dan memproses PDF DRP..."):
+    with st.spinner("Mengekstrak dan merapikan data dari PDF DRP..."):
         info, entries, auto_narrative = parse_drp_pdf(uploaded_pdf)
 
     st.success(f"Berhasil membaca data: **{info['nama']}** | Total Kunjungan: **{len(entries)} Hari**")
 
-    # Pengaturan Parameter Dokumen
     st.markdown("### ⚙️ Pengaturan Cetak Dokumen")
     c_set1, c_set2 = st.columns(2)
     with c_set1:
@@ -389,7 +420,6 @@ if uploaded_pdf is not None:
             index=0 if info["posisi_raw"].upper() == "PD" else (1 if info["posisi_raw"].upper() == "PLD" else 2)
         )
     with c_set2:
-        # Default hari terakhir pada bulan penugasan
         tahun_val = int(info["tahun_str"]) if info["tahun_str"].isdigit() else 2026
         bln_dict_rev = {
             "januari": 1, "februari": 2, "maret": 3, "april": 4, "mei": 5, "juni": 6,
@@ -401,7 +431,6 @@ if uploaded_pdf is not None:
         
         tgl_cetak = st.date_input("Pilih Tanggal Cetak Laporan:", default_date)
 
-    # Pratinjau Tabel & Narasi
     col1, col2 = st.columns([1, 1])
     with col1:
         st.subheader("📋 Matriks Kunjungan")
@@ -423,16 +452,19 @@ if uploaded_pdf is not None:
 
     ttd_bytes = uploaded_ttd.read() if uploaded_ttd is not None else None
 
-    # Generate PDF
-    pdf_output = generate_pdf_report(
-        info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
-    )
-
+    # Tombol Eksekusi Pembuatan PDF
     st.markdown("---")
-    st.download_button(
-        label="📥 Unduh Laporan KUNLAP Resmi (.pdf)",
-        data=pdf_output,
-        file_name=f"KUNLAP_{jenjang_selected}_{info['nama']}_{info['bulan_str']}_{info['tahun_str']}.pdf",
-        mime="application/pdf",
-        type="primary"
-    )
+    if st.button("🚀 Proses & Buat PDF Laporan", type="primary"):
+        with st.spinner("Menyusun PDF resmi..."):
+            try:
+                pdf_output = generate_pdf_report(
+                    info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
+                )
+                st.download_button(
+                    label="📥 Klik Di Sini untuk Mengunduh PDF KUNLAP",
+                    data=pdf_output,
+                    file_name=f"KUNLAP_{jenjang_selected}_{info['nama']}_{info['bulan_str']}_{info['tahun_str']}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Gagal menyusun PDF: {e}")
