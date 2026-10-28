@@ -65,7 +65,7 @@ st.markdown("""
 st.markdown("""
 <div class="header-card">
     <h2>📋 Generator Laporan KUNLAP Mandiri (Standar Permendes 3/2025)</h2>
-    <p>Ekstraksi otomatis DRP dengan logika kluster tematik instan, tanpa jeda loading dan bebas kalimat terpotong.</p>
+    <p>Ekstraksi otomatis DRP dengan logika kluster tematik instan dan bingkai border resmi.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -303,22 +303,37 @@ def generate_laporan_tematik(kegiatan_list, role, info):
         "rekomendasi": "\n".join([f"➤ {item}" for item in rek_items])
     }
 
-# ----------------- GENERATOR PDF RESMI (PERSIS SEPTEMBER) -----------------
+# ----------------- FUNGSI BORDER HALAMAN (PERSIS CONTOH SEPTEMBER) -----------------
+def draw_page_decorations(canvas, doc):
+    canvas.saveState()
+    # 1. Garis Kotak Bingkai Halaman Luar (Page Border Frame)
+    margin = 0.85 * cm
+    canvas.setStrokeColor(colors.black)
+    canvas.setLineWidth(1.2)
+    canvas.rect(margin, margin, doc.pagesize[0] - 2 * margin, doc.pagesize[1] - 2 * margin)
+    
+    # 2. Garis bingkai dalam tipis (Double Border khas berkas dinas)
+    inner_margin = margin + 2.5
+    canvas.setLineWidth(0.5)
+    canvas.rect(inner_margin, inner_margin, doc.pagesize[0] - 2 * inner_margin, doc.pagesize[1] - 2 * inner_margin)
+    canvas.restoreState()
+
+# ----------------- GENERATOR PDF RESMI -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=2.0 * cm,
-        rightMargin=2.0 * cm,
-        topMargin=2.0 * cm,
-        bottomMargin=2.0 * cm
+        leftMargin=1.6 * cm,
+        rightMargin=1.6 * cm,
+        topMargin=1.6 * cm,
+        bottomMargin=1.6 * cm
     )
 
     styles = getSampleStyleSheet()
     style_title = ParagraphStyle('DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER)
-    style_heading = ParagraphStyle('SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=10, spaceAfter=4)
-    style_bullet = ParagraphStyle('BulletText', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=14, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-12, spaceAfter=6)
+    style_heading = ParagraphStyle('SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=8, spaceAfter=4)
+    style_bullet = ParagraphStyle('BulletText', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=14, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-12, spaceAfter=5)
     style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12)
     style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12, alignment=TA_CENTER)
     style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=TA_CENTER)
@@ -336,7 +351,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(subheader_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['bulan_str'])}, Tahun {safe_text(info['tahun_str'])}", style_title))
-    elements.append(Spacer(1, 10))
+    elements.append(Spacer(1, 8))
 
     # A. Identitas
     elements.append(Paragraph("A. Identitas", style_heading))
@@ -350,7 +365,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         [Paragraph("Posisi", style_cell), Paragraph(":", style_cell_center), Paragraph(posisi_val, style_cell)],
         [Paragraph("Jabatan", style_cell), Paragraph(":", style_cell_center), Paragraph(posisi_val, style_cell)],
     ]
-    t_id = Table(id_data, colWidths=[3.2 * cm, 0.4 * cm, 13.4 * cm])
+    t_id = Table(id_data, colWidths=[3.2 * cm, 0.4 * cm, 14.0 * cm])
     t_id.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
@@ -358,7 +373,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         ('LEFTPADDING', (0,0), (-1,-1), 0),
     ]))
     elements.append(t_id)
-    elements.append(Spacer(1, 8))
+    elements.append(Spacer(1, 6))
 
     # B. Matriks Kunjungan (Tabel 4 Kolom Rapi)
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
@@ -381,7 +396,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         "", "", ""
     ])
 
-    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.0 * cm, 6.0 * cm], repeatRows=2)
+    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.5 * cm, 6.1 * cm], repeatRows=2)
     t_kunlap.setStyle(TableStyle([
         ('SPAN', (2, 0), (3, 0)),
         ('SPAN', (0, -1), (3, -1)),
@@ -394,7 +409,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
     ]))
     elements.append(t_kunlap)
-    elements.append(Spacer(1, 10))
+    elements.append(Spacer(1, 8))
 
     # C. Tujuan Kunjungan Lapangan
     elements.append(Paragraph("C. Tujuan Kunjungan Lapangan :", style_heading))
@@ -404,7 +419,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
             elements.append(Paragraph(safe_text(c_line), style_bullet))
     elements.append(Spacer(1, 4))
 
-    # D. Hasil Kunjungan Lapangan (Gaya Tematik September)
+    # D. Hasil Kunjungan Lapangan
     elements.append(Paragraph("D. Hasil Kunjungan Lapangan :", style_heading))
     for line in custom_text["hasil"].split("\n"):
         c_line = line.strip()
@@ -428,7 +443,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
             elements.append(Paragraph(safe_text(c_line), style_bullet))
 
     # Blok Tanda Tangan
-    elements.append(Spacer(1, 14))
+    elements.append(Spacer(1, 12))
     bln_indonesia = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     tgl_cetak_str = f"{safe_text(info['kabupaten']).title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
     
@@ -452,7 +467,8 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     sign_block.append(Paragraph(f"<u>{safe_text(info['nama'])}</u>", style_sign_name))
     elements.append(KeepTogether(sign_block))
 
-    doc.build(elements)
+    # Build dengan callback dekorasi bingkai border halaman
+    doc.build(elements, onFirstPage=draw_page_decorations, onLaterPages=draw_page_decorations)
     buffer.seek(0)
     return buffer
 
@@ -464,7 +480,7 @@ if uploaded_pdf is not None:
 
     st.success(f"✅ Berkas DRP Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
 
-    # Generate narasi tematik instan begitu PDF terbaca (0.1 detik, tanpa AI lemot)
+    # Inisialisasi tematik otomatis instan
     if "tematik_draft" not in st.session_state or st.session_state.get("file_aktif") != uploaded_pdf.name:
         st.session_state["file_aktif"] = uploaded_pdf.name
         st.session_state["tematik_draft"] = generate_laporan_tematik(raw_kegiatan, jenjang_selected, info)
