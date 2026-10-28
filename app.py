@@ -6,10 +6,11 @@ import io
 import html
 import json
 import os
+import time
 from google import genai
 from google.genai import types
 
-# ReportLab untuk membuat PDF murni
+# ReportLab untuk menghasilkan fail PDF tulen
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
@@ -26,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- INJEKSI CSS MODERN -----------------
+# ----------------- GAYA CSS -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -68,31 +69,31 @@ st.markdown("""
 st.markdown("""
 <div class="header-card">
     <h2>📋 Generator Laporan KUNLAP (AI-Powered)</h2>
-    <p>Ekstraksi otomatis berkas DRP dengan perapian narasi dinas resmi berbasis Gemini AI.</p>
+    <p>Penjanaan automatik dokumen DRP dengan struktur naratif rasmi berasaskan Gemini AI.</p>
 </div>
 """, unsafe_allow_html=True)
 
 # ----------------- LANGKAH 1 & 2: INPUT PENGGUNA -----------------
-st.markdown("##### ⚙️ Langkah 1: Pengaturan Awal")
+st.markdown("##### ⚙️ Langkah 1: Tetapan Awal")
 c_set1, c_set2 = st.columns(2)
 with c_set1:
     jenjang_selected = st.selectbox(
-        "Jenjang Jabatan:",
+        "Tahap Jawatan:",
         ["TAPM", "PD", "PLD"],
         index=0
     )
 with c_set2:
     today = datetime.date.today()
-    tgl_cetak = st.date_input("Tanggal Cetak Dokumen:", today)
+    tgl_cetak = st.date_input("Tarikh Cetakan Dokumen:", today)
 
-st.markdown("##### 📁 Langkah 2: Unggah Berkas")
+st.markdown("##### 📁 Langkah 2: Muat Naik Fail")
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     uploaded_pdf = st.file_uploader("PDF DRP Bulanan", type=["pdf"])
 with col_up2:
-    uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
+    uploaded_ttd = st.file_uploader("Foto Tandatangan (Pilihan: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-# ----------------- FUNGSI PARSER & AI -----------------
+# ----------------- FUNGSI PEMPROSESAN & AI -----------------
 def clean_word(txt):
     if not txt:
         return ""
@@ -107,53 +108,61 @@ def safe_text(txt):
     return html.escape(str(txt).strip())
 
 def generate_narasi_ai(kegiatan_list, role, info):
-    # Mengambil key dari secrets Streamlit Cloud
     api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
     if not api_key:
-        raise ValueError("API Key belum disetel di Secrets Streamlit Cloud.")
+        raise ValueError("API Key belum ditetapkan pada Secrets Streamlit Cloud.")
 
     client = genai.Client(api_key=api_key)
     
     kegiatan_teks = "\n".join([
-        f"- Kunjungan tgl {k['tanggal']} di {k['kecamatan']} ({k['desa']}): {k['uraian']}" 
+        f"- Tarikh {k['tanggal']} di {k['kecamatan']} ({k['desa']}): {k['uraian']}" 
         for k in kegiatan_list
     ])
 
     prompt = f"""
-    Anda adalah seorang penyusun laporan resmi Tenaga Pendamping Profesional Kementerian Desa (Kemendesa).
-    Susun narasi resmi Laporan Kunjungan Lapangan Bulanan (KUNLAP) untuk jenjang jabatan: {role}.
+    Anda adalah seorang penyusun laporan rasmi Tenaga Pendamping Profesional Kementerian Desa (Kemendesa).
+    Susun naratif rasmi Laporan Kunjungan Lapangan Bulanan (KUNLAP) bagi jawatan: {role}.
     Wilayah Penugasan: Kabupaten {info['kabupaten']}, Provinsi {info['provinsi']}.
-    Periode Pelaporan: {info['periode']}.
+    Tempoh Laporan: {info['periode']}.
 
-    Berikut catatan log aktivitas riil kunjungan lapangan yang telah dilaksanakan:
+    Berikut catatan log aktiviti lapangan:
     ---
     {kegiatan_teks}
     ---
 
-    Instruksi Penulisan:
-    1. Gaya bahasa HARUS baku, formal kedinasan, padat, dan mengalir profesional. Hindari gaya buku harian seperti 'Hari ini kami...', 'Pada hari Rabu...', dsb.
-    2. Bagian TUJUAN: Buat 1 sampai 2 paragraf padat yang merangkum maksud pendampingan makro serta isu-isu teknis yang dikawal (stunting, eHDW, APBDes, BUMDes, monev DD).
-    3. Bagian HASIL: Buat dalam bentuk poin-poin tematik ringkas (gunakan tanda strip '- ' di awal tiap baris) yang merangkum capaian riil per bidang/desa, jangan ada kalimat terpotong.
-    4. Bagian TINDAK LANJUT: Buat 3-4 langkah aksi konkret berurutan (1., 2., dst).
-    5. Bagian REKOMENDASI: Buat 3-4 rekomendasi operasional menggunakan tanda strip '- ' di awal baris.
+    Arahan Penulisan:
+    1. Bahasa formal, baku, dan gaya bahasa jabatan kerajaan. Elakkan ayat diari harian seperti 'Hari ini kami...', 'Pada hari Rabu...'.
+    2. TUJUAN: Bina 1-2 perenggan padat berkenaan tujuan makro dan isu teknikal (stunting, eHDW, APBDes, BUMDes, Monev DD).
+    3. HASIL: Senaraikan poin tematik ringkas mengikut isu/wilayah menggunakan tanda sempang '- ' di setiap baris (jangan ada ayat tergantung).
+    4. TINDAK LANJUT: Senaraikan 3-4 langkah tindakan berurutan (1., 2., dst).
+    5. REKOMENDASI: Senaraikan 3-4 cadangan menggunakan tanda sempang '- ' di setiap baris.
 
-    Output HARUS berupa JSON valid tanpa teks pengantar:
+    Format WAJIB JSON yang sah tanpa teks tambahan:
     {{
-        "tujuan": "paragraf tujuan...",
-        "hasil": "- Capaian bidang 1...\\n- Capaian bidang 2...",
-        "rtl": "1. Langkah satu...\\n2. Langkah dua...",
-        "rekomendasi": "- Rekomendasi satu...\\n- Rekomendasi dua..."
+        "tujuan": "perenggan tujuan...",
+        "hasil": "- Dapatan 1...\\n- Dapatan 2...",
+        "rtl": "1. Tindakan satu...\\n2. Tindakan dua...",
+        "rekomendasi": "- Cadangan satu...\\n- Cadangan dua..."
     }}
     """
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json"
-        )
-    )
-    return json.loads(response.text)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            err_msg = str(e)
+            if ("503" in err_msg or "UNAVAILABLE" in err_msg) and attempt < max_retries - 1:
+                time.sleep(3 * (attempt + 1))
+                continue
+            raise e
 
 @st.cache_data(show_spinner=False)
 def parse_drp_pdf(pdf_bytes, selected_role):
@@ -178,7 +187,7 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     kab_val = extract_field(r"Kabupaten(?:/Kota)?\s*:\s*([^\n\r]+)", full_text)
     prov_val = extract_field(r"Provinsi\s*:\s*([^\n\r]+)", full_text)
 
-    # Kosongkan kecamatan untuk jenjang TAPM
+    # Kosongkan maklumat kecamatan jika jawatan TAPM
     kec_terpilih = "-" if selected_role == "TAPM" or not kec_val else kec_val
 
     per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text, flags=re.IGNORECASE)
@@ -255,7 +264,7 @@ def parse_drp_pdf(pdf_bytes, selected_role):
 
     return info, kunlap_entries, kegiatan_lengkap
 
-# ----------------- GENERATOR PDF RESMI -----------------
+# ----------------- PENJANAAN PDF -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -285,13 +294,13 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     }
     posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("TAPM", "TENAGA AHLI PEMBERDAYAAN MASYARAKAT"))
 
-    # Judul
+    # Tajuk Dokumen
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
     elements.append(Spacer(1, 10))
 
-    # A. Identitas
+    # A. Identiti
     elements.append(Paragraph("A. Identitas", style_heading))
     kecamatan_tampil = "-" if jenjang_pilihan == "TAPM" else safe_text(info["kecamatan"])
     id_data = [
@@ -313,7 +322,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     elements.append(t_id)
     elements.append(Spacer(1, 6))
 
-    # B. Matriks Kunjungan
+    # B. Matriks Lawatan
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
     t_data = [
         [Paragraph("Hari ke", style_cell_bold), Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold), Paragraph("Lokasi Kunjungan", style_cell_bold), ""],
@@ -375,7 +384,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
         if c_line:
             elements.append(Paragraph(f"• {safe_text(c_line)}", style_bullet))
 
-    # Tanda Tangan
+    # Pengesahan
     elements.append(Spacer(1, 12))
     bln_indonesia = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     tgl_cetak_str = f"{safe_text(info['kabupaten']).title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
@@ -404,32 +413,32 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     buffer.seek(0)
     return buffer
 
-# ----------------- EKSEKUSI UI -----------------
+# ----------------- PELAKSANAAN UI -----------------
 if uploaded_pdf is not None:
     pdf_bytes = uploaded_pdf.getvalue()
-    with st.spinner("Membaca berkas DRP..."):
+    with st.spinner("Membaca data DRP..."):
         info, entries, raw_kegiatan = parse_drp_pdf(pdf_bytes, jenjang_selected)
 
-    st.success(f"✅ Data Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
+    st.success(f"✅ Data Dikesan: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
 
-    # Inisialisasi state untuk narasi agar tidak memanggil AI berulang kali
+    # Inisialisasi naratif AI
     if "ai_narrative" not in st.session_state or st.session_state.get("last_uploaded") != uploaded_pdf.name:
-        with st.spinner("🤖 Gemini AI sedang menyusun narasi resmi laporan kedinasan..."):
+        with st.spinner("🤖 Gemini AI sedang menyusun naratif rasmi laporan..."):
             try:
                 st.session_state["ai_narrative"] = generate_narasi_ai(raw_kegiatan, jenjang_selected, info)
                 st.session_state["last_uploaded"] = uploaded_pdf.name
             except Exception as e:
                 st.error(f"Gagal memproses via AI: {e}. Menggunakan fallback.")
                 st.session_state["ai_narrative"] = {
-                    "tujuan": "Pelaksanaan kunjungan kerja dalam rangka fasilitasi dan pendampingan tata kelola desa.",
-                    "hasil": "- Terlaksananya monitoring realisasi program kerja desa.",
-                    "rtl": "1. Melakukan tindak lanjut evaluasi.",
-                    "rekomendasi": "- Pemerintah desa agar mempercepat penyusunan administrasi pertanggungjawaban."
+                    "tujuan": "Pelaksanaan lawatan kerja bagi tujuan pemudahcaraan dan bimbingan tadbir urus desa.",
+                    "hasil": "- Pelaksanaan pemantauan program kerja desa secara berkala.",
+                    "rtl": "1. Melaksanakan tindakan susulan penilaian.",
+                    "rekomendasi": "- Pihak kerajaan desa disarankan mempercepatkan penyusunan pentadbiran pertanggungjawaban."
                 }
 
     narrative = st.session_state["ai_narrative"]
 
-    st.markdown("##### 📝 Langkah 3: Pratinjau & Penyesuaian Narasi")
+    st.markdown("##### 📝 Langkah 3: Pratonton & Penyesuaian Naratif")
     tab1, tab2 = st.tabs(["📋 Matriks Kunjungan", "✍️ Narasi Laporan"])
     
     with tab1:
@@ -453,17 +462,17 @@ if uploaded_pdf is not None:
 
     st.markdown("---")
     if st.button("🚀 Buat Dokumen PDF KUNLAP", type="primary"):
-        with st.spinner("Menyusun PDF resmi..."):
+        with st.spinner("Menjana PDF rasmi..."):
             try:
                 pdf_output = generate_pdf_report(
                     info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
                 )
                 st.download_button(
-                    label="📥 Unduh PDF Sekarang",
+                    label="📥 Muat Turun PDF Sekarang",
                     data=pdf_output,
                     file_name=download_filename,
                     mime="application/pdf",
                     use_container_width=True
                 )
             except Exception as e:
-                st.error(f"Gagal menyusun PDF: {e}")
+                st.error(f"Ralat semasa membina PDF: {e}")
