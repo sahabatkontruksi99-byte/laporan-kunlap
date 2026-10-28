@@ -4,6 +4,7 @@ import re
 import datetime
 import io
 import html
+import os
 
 # ReportLab untuk menghasilkan PDF resmi
 from reportlab.lib.pagesizes import A4
@@ -22,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ----------------- TAMPILAN MODERN CSS -----------------
+# ----------------- STILING CSS -----------------
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -32,21 +33,21 @@ st.markdown("""
     .header-card {
         background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
         color: #FFFFFF !important;
-        padding: 22px 20px;
+        padding: 20px 16px;
         border-radius: 14px;
-        margin-bottom: 22px;
-        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
     }
     .header-card h2 {
         color: #FFFFFF !important;
         margin: 0 0 6px 0;
         font-weight: 700;
-        font-size: 1.4rem;
+        font-size: 1.35rem;
     }
     .header-card p {
         color: #E0E7FF !important;
         margin: 0;
-        font-size: 0.90rem;
+        font-size: 0.88rem;
         line-height: 1.4;
     }
     .stButton > button {
@@ -57,61 +58,38 @@ st.markdown("""
         padding: 12px 20px;
         border-radius: 12px;
         border: none;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
-        font-size: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 <div class="header-card">
-    <h2>📋 Generator Laporan Kunjungan Lapangan (KUNLAP)</h2>
-    <p>Otomatisasi laporan dinas berbasis Permendes PDT No. 3 Tahun 2025 untuk jenjang PLD, PD, dan TAPM secara instan.</p>
+    <h2>📋 Generator Laporan KUNLAP Mandiri (Standar Permendes 3/2025)</h2>
+    <p>Ekstraksi otomatis DRP dengan logika kluster tematik instan, tanpa jeda loading dan bebas kalimat terpotong.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ----------------- ATURAN KLUSTER TEMATIK SESUAI PERMENDES 3/2025 -----------------
-KLUSTER_ATURAN = {
-    "Akuntabilitas Keuangan & Monev DD": [
-        "apbdes", "p-apbdes", "rapbdes", "dana desa", "dd tahap", "silpa", 
-        "rkd", "siskeudes", "serapan", "spj", "monev dd", "opname", "pajak"
-    ],
-    "Perencanaan Desa & Tata Kelola Regulasi": [
-        "rkpdes", "rpjmdes", "musdes", "perdes", "perangkat desa", 
-        "bpd", "penjaringan", "regulasi", "pemberdayaan", "kelembagaan"
-    ],
-    "Konvergensi Penanganan Stunting & eHDW": [
-        "stunting", "ehdw", "ehdw learning", "kpm", "posyandu", "gizi", "ibu hamil"
-    ],
-    "Pengembangan Ekonomi & BUM Desa": [
-        "bumdes", "bum desa", "mbg", "makan bergizi gratis", "badan hukum", "usaha desa", "pasar desa"
-    ],
-    "Pendataan Desa, SDGs & Perlinsos": [
-        "sdgs", "pendataan", "idm", "perlinsos", "bansos", "samin", "budaya", "monografi"
-    ]
-}
-
-# ----------------- LANGKAH 1 & 2: INPUT PENGGUNA -----------------
-st.markdown("##### ⚙️ Langkah 1: Pengaturan Jenjang & Tanggal")
+# ----------------- INPUT PENGGUNA -----------------
+st.markdown("##### ⚙️ Langkah 1: Pengaturan Awal")
 c_set1, c_set2 = st.columns(2)
 with c_set1:
     jenjang_selected = st.selectbox(
         "Jenjang Jabatan Tenaga Pendamping:",
-        ["PLD", "PD", "TAPM"],
+        ["TAPM", "PD", "PLD"],
         index=0
     )
 with c_set2:
     today = datetime.date.today()
     tgl_cetak = st.date_input("Tanggal Cetak Dokumen:", today)
 
-st.markdown("##### 📁 Langkah 2: Unggah Berkas DRP")
+st.markdown("##### 📁 Langkah 2: Unggah Berkas")
 col_up1, col_up2 = st.columns(2)
 with col_up1:
-    uploaded_pdf = st.file_uploader("PDF DRP Bulanan", type=["pdf"])
+    uploaded_pdf = st.file_uploader("Unggah PDF DRP Bulanan", type=["pdf"])
 with col_up2:
     uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-# ----------------- FUNGSI PARSING & LOGIKA TEMATIK -----------------
+# ----------------- FUNGSI PARSER DASAR -----------------
 def clean_word(txt):
     if not txt:
         return ""
@@ -124,30 +102,6 @@ def safe_text(txt):
     if not txt:
         return ""
     return html.escape(str(txt).strip())
-
-def deteksi_kluster(text):
-    text_low = text.lower()
-    for kluster, keywords in KLUSTER_ATURAN.items():
-        if any(kw in text_low for kw in keywords):
-            return kluster
-    return "Tata Kelola & Fasilitasi Desa"
-
-def bersihkan_uraian(raw_body):
-    # Hapus judul aktivitas di awal
-    c = re.sub(
-        r"^(?:Koordinasi Pendampingan|Pembekalan \(IST\/OJT\)|Regulasi Tentang Desa|Peningkatan Kapasitas PD\/PLD|Fasilitasi Desa)[\.\s]*", 
-        "", raw_body.strip(), flags=re.IGNORECASE
-    )
-    # Hapus frasa pembuka catatan harian (misal: "Hari ini kami...", "Pada hari Rabu...")
-    c = re.sub(r"^(?:Hari ini[^\.]*?,\s*|Pada hari[^\.]*?,\s*|Pada tanggal[^\.]*?,\s*)", "", c, flags=re.IGNORECASE)
-    c = re.sub(r"\s+", " ", c).strip()
-    
-    # Ambil 1-2 kalimat inti tanpa memotong angka rupiah
-    sentences = [s.strip() for s in re.split(r'(?<!\d)\.(?!\d)\s*', c) if len(s.strip()) > 15]
-    if sentences:
-        ringkasan = ". ".join(sentences[:2]) + "."
-        return ringkasan
-    return c[:200] + "..." if len(c) > 200 else c
 
 @st.cache_data(show_spinner=False)
 def parse_drp_pdf(pdf_bytes, selected_role):
@@ -168,11 +122,8 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     kab_val = extract_field(r"Kabupaten(?:/Kota)?\s*:\s*([^\n\r]+)", full_text)
     prov_val = extract_field(r"Provinsi\s*:\s*([^\n\r]+)", full_text)
 
-    # Identitas kecamatan: Kosong/strip jika TAPM, wajib terisi jika PLD / PD
-    if selected_role == "TAPM" or not kec_val:
-        kec_terpilih = "-"
-    else:
-        kec_terpilih = kec_val
+    # TAPM bertugas di tingkat kabupaten, kecamatan dikosongkan
+    kec_terpilih = "-" if selected_role == "TAPM" or not kec_val else kec_val
 
     per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text, flags=re.IGNORECASE)
     bln_txt = per_m.group(1).title() if per_m else "Oktober"
@@ -189,7 +140,6 @@ def parse_drp_pdf(pdf_bytes, selected_role):
         "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # Ambil bagian tabel kunjungan lapangan
     kunlap_section_match = re.search(
         r"DAFTAR LAPORAN KUNJUNGAN LAPANGAN(.*?)(?:Total Laporan Kunjungan Lapangan|DATA CUTI|\Z)", 
         full_text, 
@@ -204,13 +154,10 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     
     matches = item_pattern.findall(kunlap_raw_text)
     kunlap_entries = []
-    hasil_tabel = []
-    kluster_ditemukan = set()
+    kegiatan_lengkap = []
 
     for idx, (tgl_raw, raw_loc, body) in enumerate(matches):
         parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
-        
-        # Ekstraksi lokasi sesuai hierarki
         if len(parts) >= 4:
             row_kec = parts[2].title()
             row_desa = parts[3].title()
@@ -218,14 +165,13 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             row_kec = parts[2].title()
             row_desa = "-"
         else:
-            row_kec = info["kabupaten"].title() if selected_role == "TAPM" else info["kecamatan"].title()
+            row_kec = info["kabupaten"].title()
             row_desa = parts[-1].title() if parts else "-"
 
-        # Format Tanggal
         if tgl_raw:
             tgl_clean = tgl_raw.replace("$", "").strip()
             t_parts = re.split(r"[\/\-]", tgl_clean)
-            row_tgl = f"{int(t_parts[0])}-{t_parts[1].zfill(2)}-{'20'+t_parts[2] if len(t_parts[2])==2 else t_parts[2]}" if len(t_parts) == 3 else tgl_clean
+            row_tgl = f"{int(t_parts[0]):02d}-{int(t_parts[1]):02d}-{'20'+t_parts[2] if len(t_parts[2])==2 else t_parts[2]}" if len(t_parts) == 3 else tgl_clean
         else:
             row_tgl = f"Kunjungan-{idx+1}"
 
@@ -235,146 +181,166 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             "desa": row_desa
         })
 
-        kluster = deteksi_kluster(body)
-        kluster_ditemukan.add(kluster)
-        ringkasan_capaian = bersihkan_uraian(body)
-
-        lokasi_teks = f"{row_desa}<br/>(Kec. {row_kec})" if row_desa != "-" else f"Kec. {row_kec}"
-        hasil_tabel.append({
-            "no": str(idx + 1),
-            "waktu_lokasi": f"{row_tgl}<br/>{lokasi_teks}",
-            "bidang": kluster,
-            "capaian": ringkasan_capaian
+        body_clean = re.sub(r"\s+", " ", body).strip()
+        kegiatan_lengkap.append({
+            "tanggal": row_tgl,
+            "kecamatan": row_kec,
+            "desa": row_desa,
+            "uraian": body_clean
         })
 
-    # Pembentukan Narasi Cepat Berbasis Peran (Permendes 3/2025)
-    total_hari = len(kunlap_entries)
-    daftar_kluster_str = ", ".join(list(kluster_ditemukan)[:3]) if kluster_ditemukan else "tata kelola administrasi dan pembangunan desa"
+    return info, kunlap_entries, kegiatan_lengkap
 
-    if selected_role == "PLD":
-        wilayah_narasi = f"Desa dampingan di wilayah Kecamatan {info['kecamatan'].title()}"
-        tujuan_tek = (
-            f"Pelaksanaan pendampingan lapangan selama {total_hari} hari kerja pada periode {info['periode']} di {wilayah_narasi} "
-            f"dilaksanakan dalam rangka memenuhi mandat tugas Pendamping Lokal Desa (PLD) sesuai Permendes PDT Nomor 3 Tahun 2025, "
-            f"khususnya dalam memfasilitasi pendataan desa, perencanaan partisipatif (RKPDes/APBDes), pendampingan KPMD/kader stunting, "
-            f"serta penguatan akuntabilitas tata kelola pemerintahan desa dan BUM Desa berskala lokal."
-        )
-        tujuan_fokus = (
-            f"Secara operasional di tingkat desa dampingan, fokus kerja bulan ini diarahkan pada agenda: {daftar_kluster_str}. "
-            f"Pendampingan memastikan partisipasi aktif masyarakat dan tertib administrasi SPJ kegiatan pembangunan di tingkat desa berjalan optimal."
-        )
-        rtl_tek = (
-            "1. Melakukan pendampingan intensif kepada Pemerintah Desa dalam percepatan penginputan data Siskeudes dan kelengkapan SPJ realisasi kegiatan.\n"
-            "2. Mengawal Kader Pembangunan Manusia (KPM) dalam pemutakhiran data berkala pada aplikasi eHDW serta tindak lanjut pembelajaran eHDW Learning.\n"
-            "3. Mendampingi pengurus BUM Desa dalam penataan administrasi pelaporan keuangan unit usaha dan persiapan musyawarah desa pertanggungjawaban.\n"
-            "4. Mengikuti koordinasi berkala bersama Pendamping Desa (PD) dan Pemerintah Desa guna sinkronisasi data capaian pembangunan bulanan."
-        )
-        rek_tek = (
-            "Pemerintah Desa agar segera menuntaskan penyusunan dokumen laporan realisasi kegiatan fisik dan SPJ secara tertib waktu.\n"
-            "Kader desa (KPM dan Kader Posyandu) didorong lebih proaktif dalam memperbarui data sasaran stunting tingkat dusun.\n"
-            "Pengurus BUM Desa agar melengkapi pencatatan transaksi pembukuan dan memvalidasi inventaris aset usaha desa.\n"
-            "Meningkatkan koordinasi rutin antara BPD, RT/RW, dan Pemerintah Desa untuk menjamin musyawarah perencanaan desa berjalan partisipatif."
-        )
-    elif selected_role == "PD":
-        wilayah_narasi = f"Kecamatan {info['kecamatan'].title()}"
-        tujuan_tek = (
-            f"Pelaksanaan supervisi dan pendampingan lapangan selama {total_hari} hari kerja pada periode {info['periode']} di wilayah {wilayah_narasi} "
-            f"diselenggarakan berdasarkan amanat Permendes PDT Nomor 3 Tahun 2025 bagi Pendamping Desa (PD) untuk mengoordinasikan percepatan penyaluran, "
-            f"perencanaan, pemanfaatan, serta rekapitulasi pelaporan Dana Desa di tingkat kecamatan, memfasilitasi kerja sama antar-desa, dan melakukan mentoring berjenjang kepada PLD."
-        )
-        tujuan_fokus = (
-            f"Fokus pendampingan kecamatan bulan ini mencakup agenda strategis: {daftar_kluster_str}. "
-            f"Langkah ini ditujukan untuk meminimalisasi hambatan serapan anggaran serta menjamin keselarasan program desa dengan prioritas nasional."
-        )
-        rtl_tek = (
-            "1. Mempercepat asistensi penyusunan dokumen Perdes Perubahan APBDes dan rekonsiliasi serapan Dana Desa di tingkat kecamatan.\n"
-            "2. Melakukan mentoring teknis kepada seluruh Pendamping Lokal Desa (PLD) dalam monitoring progres pengisian aplikasi eHDW dan Monev DD.\n"
-            "3. Memfasilitasi kesiapan kelembagaan BUM Desa Bersama dan pemetaan kerja sama antar-desa bidang ekonomi.\n"
-            "4. Mengoordinasikan hasil evaluasi monev kecamatan kepada TAPM Kabupaten untuk penanganan anomali penatausahaan keuangan desa."
-        )
-        rek_tek = (
-            "Kasi PMD Kecamatan dan Pemerintah Desa agar meningkatkan akselerasi verifikasi proposal pencairan dan evaluasi LPJ APBDes.\n"
-            "Pendamping Lokal Desa (PLD) agar mengintensifkan fasilitasi lapangan terhadap desa yang mengalami keterlambatan penyerapan anggaran.\n"
-            "Pemerintah Desa didorong mengalokasikan mandatory spending pencegahan stunting dan ketahanan pangan secara proporsional.\n"
-            "Memperkuat harmonisasi koordinasi lintas sektor antara Forkopimcam, TPP Kecamatan, dan asosiasi kepala desa."
-        )
-    else: # TAPM
-        wilayah_narasi = f"Kabupaten {info['kabupaten'].title()}"
-        tujuan_tek = (
-            f"Pelaksanaan kunjungan kerja dan supervisi monitoring lapangan selama {total_hari} hari kerja pada periode {info['periode']} di wilayah penugasan {wilayah_narasi} "
-            f"dilaksanakan dalam rangka memenuhi tugas Tenaga Ahli Pemberdayaan Masyarakat (TAPM) sesuai Permendes PDT Nomor 3 Tahun 2025 dalam mendukung sinergitas program Organisasi "
-            f"Perangkat Daerah (OPD) kabupaten/kota, percepatan dokumen penyaluran Dana Desa, pengendalian pelaksanaan tugas PD dan PLD, serta advokasi kebijakan SDGs Desa."
-        )
-        tujuan_fokus = (
-            f"Secara operasional, penugasan berfokus pada pengawalan kluster prioritas: {daftar_kluster_str}. "
-            f"Pengendalian berjenjang ini memastikan seluruh regulasi, akuntabilitas anggaran, dan kemitraan strategis desa terlaksana secara transparan dan akuntabel."
-        )
-        rtl_tek = (
-            "1. Mendorong percepatan penyelesaian regulasi desa dan sinkronisasi berkas pencairan Dana Desa tahap berjalan bersama Dinas PMD Kabupaten.\n"
-            "2. Melakukan supervisi dan verifikasi berkala terhadap penginputan data pada aplikasi Monev DD guna mitigasi keterlambatan salur.\n"
-            "3. Mengawal validasi data kesiapan BUM Desa dalam mendukung program kemitraan ketahanan pangan dan Program Makan Bergizi Gratis (MBG).\n"
-            "4. Melaksanakan pembinaan berjenjang dan peningkatan kapasitas bagi Tenaga Pendamping Profesional (PD dan PLD) di zona dampingan."
-        )
-        rek_tek = (
-            "Pemerintah Desa agar segera menindaklanjuti hasil rekomendasi monitoring lapangan dan menuntaskan SPJ kegiatan fisik 100%.\n"
-            "Dinas PMD dan Tim Pembina Kabupaten agar memperkuat fasilitasi verifikasi berkas permohonan badan hukum BUM Desa.\n"
-            "TPP di tingkat kecamatan (PD) agar aktif memitigasi anomali pelaporan Siskeudes dan mengawal kepatuhan mandatory prioritas dana desa.\n"
-            "Memperkokoh forum koordinasi tripartit antara TAPM Kabupaten, Pemerintah Daerah, dan Tenaga Pendamping Lapangan secara berkelanjutan."
-        )
+# ----------------- MESIN KLUSTER TEMATIK (GAYA SEPTEMBER) -----------------
+def generate_laporan_tematik(kegiatan_list, role, info):
+    full_corpus = " ".join([k["uraian"].lower() for k in kegiatan_list])
+    
+    desa_list = list(dict.fromkeys([k["desa"] for k in kegiatan_list if k["desa"] != "-"]))
+    kec_list = list(dict.fromkeys([k["kecamatan"] for k in kegiatan_list if k["kecamatan"] != "-"]))
+    
+    desa_sample = ", ".join(desa_list[:4]) if desa_list else "desa-desa dampingan"
+    kec_sample = ", ".join(kec_list[:3]) if kec_list else info["kabupaten"]
 
-    tujuan_final = f"{tujuan_tek}\n\n{tujuan_fokus}"
+    has_stunting = any(w in full_corpus for w in ["stunting", "ehdw", "kpm", "gizi"])
+    has_bumdes = any(w in full_corpus for w in ["bumdes", "bum desa", "mbg", "makan bergizi"])
+    has_keuangan = any(w in full_corpus for w in ["apbdes", "silpa", "monev dd", "dana desa", "siskeudes"])
+    has_regulasi = any(w in full_corpus for w in ["perangkat desa", "bpd", "rkpdes", "perdes", "musdes"])
+    has_budaya = any(w in full_corpus for w in ["monografi", "samin", "budaya"])
 
-    narasi = {
-        "tujuan": tujuan_final,
-        "hasil_tabel": hasil_tabel,
-        "rtl": rtl_tek,
-        "rekomendasi": rek_tek
+    tujuan_items = []
+    hasil_items = []
+    rtl_items = []
+    rek_items = []
+
+    if role == "TAPM":
+        # C. TUJUAN TAPM
+        if has_keuangan:
+            tujuan_items.append(f"Melaksanakan koordinasi bersama Pemerintah Kecamatan dan Desa (seperti di {kec_sample}) guna memfasilitasi pencermatan realisasi APBDes TA 2026, evaluasi serapan anggaran, serta penyelesaian SilPA TA 2025.")
+        if has_regulasi or has_budaya:
+            tujuan_items.append(f"Memfasilitasi dan mengadvokasi regulasi penataan kelembagaan desa, pembentukan panitia pengisian BPD periode 2027-2035 di Kecamatan {kec_sample}, serta penggalian potensi lokal kearifan budaya desa.")
+        if has_bumdes:
+            tujuan_items.append("Mendampingi pemetaan potensi dan kesiapan kelembagaan BUM Desa dan BUM Desa Bersama dalam mendukung Program Prioritas Nasional Makan Bergizi Gratis (MBG).")
+        if has_stunting:
+            tujuan_items.append(f"Melakukan supervisi penganggaran konvergensi stunting pada penyusunan R-APBDes TA 2027 serta pemutakhiran data akun eHDW Learning bersama KPM di {desa_sample}.")
+        tujuan_items.append("Memberikan bimbingan teknis (OJT) dan supervisi berjenjang kepada Pendamping Desa (PD) dan PLD terkait optimalisasi pelaporan realisasi pemanfaatan Dana Desa pada aplikasi resmi Monev DD.")
+
+        # D. HASIL TAPM
+        if has_keuangan:
+            hasil_items.append(f"Terfasilitasinya evaluasi progres APBDes TA 2026 se-wilayah kecamatan dampingan dan terbangunnya komitmen percepatan kegiatan fisik tertunda SilPA 2025 pada desa dampingan ({desa_sample}).")
+        if has_bumdes:
+            hasil_items.append("Terpetakannya kesiapan dan validasi data unit usaha BUM Desa se-Kabupaten Bojonegoro dalam mendukung rantai pasok penyediaan pangan Program Makan Bergizi Gratis (MBG).")
+        if has_regulasi:
+            hasil_items.append(f"Tersosialisasikannya tahapan teknis pengisian keanggotaan BPD periode 2027-2035 di wilayah {kec_sample} serta terasistensinya regulasi penjaringan perangkat desa agar akuntabel dan tertib aturan.")
+        if has_stunting:
+            hasil_items.append("Terfasilitasinya pemenuhan mandatory spending penanganan stunting pada draf R-APBDes 2027 serta tersinkronisasinya data laporan eHDW bersama KPM.")
+        hasil_items.append("Meningkatnya kapasitas manajerial TPP (PD/PLD) melalui forum rakor berkala serta terverifikasinya pemutakhiran data input serapan anggaran pada laman monevdd.kemendesa.go.id.")
+
+        # E. TINDAK LANJUT TAPM
+        rtl_items.append("Mengarahkan seluruh TPP (PD dan PLD) untuk mengawal percepatan penetapan Perdes Perubahan APBDes 2026 serta penyusunan R-APBDes 2027 tepat waktu.")
+        rtl_items.append("Mengintensifkan supervisi dan validasi data kelengkapan dokumen badan hukum BUM Desa dan kesiapan mitra ketahanan pangan MBG.")
+        rtl_items.append("Melakukan pengawalan berkala terhadap pemutakhiran data realisasi fisik dan penyerapan anggaran secara mandiri pada aplikasi Monev DD.")
+
+        # F. REKOMENDASI TAPM
+        rek_items.append("Bagi Pemerintah Desa diharapkan mempercepat penyelesaian administrasi SPJ kegiatan fisik 100% dan penatausahaan aset desa guna kelancaran penyusunan anggaran tahun berikutnya.")
+        rek_items.append("Bagi Tenaga Pendamping Profesional (PD/PLD) diimbau untuk terus meningkatkan intensitas koordinasi dengan Kasi PMD Kecamatan, memperkuat monitoring lapangan, serta aktif mengawal kepatuhan pelaporan digital desa.")
+
+    elif role == "PD":
+        # C. TUJUAN PD
+        tujuan_items.append(f"Memfasilitasi percepatan penyusunan dan penetapan dokumen perencanaan dan penganggaran desa (RKPDes/APBDes) di wilayah Kecamatan {kec_sample}.")
+        if has_stunting:
+            tujuan_items.append("Mendampingi Kader Pembangunan Manusia (KPM) dalam pemutakhiran data stunting bulanan dan aktivasi instrumen eHDW di tingkat desa.")
+        if has_bumdes:
+            tujuan_items.append("Mengoordinasikan pengembangan kelembagaan BUM Desa serta penguatan unit usaha bersama antar-desa.")
+        tujuan_items.append("Melakukan pendampingan pengadministrasian penyaluran Dana Desa serta mentoring teknis kepada Pendamping Lokal Desa (PLD).")
+
+        # D. HASIL PD
+        hasil_items.append(f"Terfasilitasinya sinkronisasi dokumen R-APBDes dan pengadministrasian penatausahaan APBDes di desa-desa Kecamatan {kec_sample}.")
+        if has_stunting:
+            hasil_items.append("Tersusunnya laporan konvergensi stunting desa dan terverifikasinya data sasaran penerima manfaat pada sistem eHDW.")
+        if has_bumdes:
+            hasil_items.append("Terverifikasinya profil usaha dan kelengkapan dokumen administrasi operasional BUM Desa.")
+        hasil_items.append("Terekapitulasi dan terlaporkannya progres serapan Dana Desa serta terselenggaranya pendampingan rutin PLD secara berkala.")
+
+        # E. RTL PD
+        rtl_items.append("Mengawal desa dampingan agar menuntaskan penetapan Perdes APBDes tepat waktu.")
+        rtl_items.append("Melakukan asistensi input pelaporan realisasi Dana Desa ke aplikasi Siskeudes dan Monev DD.")
+        rtl_items.append("Meningkatkan frekuensi mentoring pendampingan kepada PLD dan KPM di desa dampingan.")
+
+        # F. REKOMENDASI PD
+        rek_items.append("Pemerintah Desa agar menjaga ketepatan waktu dalam siklus pelaporan keuangan dan penyelesaian administrasi pertanggungjawaban fisik.")
+        rek_items.append("PLD dan lembaga desa diharapkan memperkokoh koordinasi tripartit bersama pihak kecamatan guna memitigasi kendala lapangan secara dini.")
+
+    else: # PLD
+        # C. TUJUAN PLD
+        tujuan_items.append(f"Melakukan pendampingan langsung kepada Pemerintah Desa dan BPD di {desa_sample} dalam fasilitasi tata kelola pemerintahan dan perencanaan pembangunan lokal desa.")
+        if has_stunting:
+            tujuan_items.append("Mendampingi KPM dan kader posyandu dalam pencatatan dan pelaporan data penanganan stunting melalui aplikasi eHDW.")
+        if has_keuangan:
+            tujuan_items.append("Mendampingi kaur dan pelaksana kegiatan anggaran dalam tertib administrasi penatausahaan buku kas dan bukti SPJ fisik desa.")
+        tujuan_items.append("Mencatat dan melaporkan kegiatan pendampingan harian secara aktif ke dalam Sistem Informasi Desa (SID/DRP).")
+
+        # D. HASIL PLD
+        hasil_items.append(f"Terfasilitasinya musyawarah desa, penyusunan draf perencanaan, dan tertib administrasi tata kelola pemerintahan di {desa_sample}.")
+        if has_stunting:
+            hasil_items.append("Terlaksananya pemutakhiran data pengukuran stunting dan terfasilitasinya koordinasi KPM bersama kader kesehatan desa.")
+        if has_keuangan:
+            hasil_items.append("Tertibnya kelengkapan dokumen pencairan anggaran dan terasistensinya pelaporan realisasi kegiatan pembangunan skala lokal desa.")
+        hasil_items.append("Terinputnya seluruh catatan aktivitas dan pelaporan harian pada aplikasi DRP secara berkala.")
+
+        # E. RTL PLD
+        rtl_items.append("Mengawal tindak lanjut catatan evaluasi administrasi dan penyelesaian SPJ di desa dampingan.")
+        rtl_items.append("Mendampingi kader desa dalam pemutakhiran data SDGs Desa dan eHDW.")
+        rtl_items.append("Melakukan koordinasi intensif dengan Pendamping Desa (PD) terkait progres kegiatan lapangan.")
+
+        # F. REKOMENDASI PLD
+        rek_items.append("Pemerintah Desa agar konsisten mengedepankan prinsip transparansi dan pelibatan masyarakat dalam setiap tahapan pembangunan desa.")
+        rek_items.append("Kader desa dan pengurus kelembagaan desa agar aktif memperbarui data sasaran program kerja secara berkala.")
+
+    return {
+        "tujuan": "\n".join([f"➤ {item}" for item in tujuan_items]),
+        "hasil": "\n".join([f"➤ {item}" for item in hasil_items]),
+        "rtl": "\n".join([f"➤ {item}" for item in rtl_items]),
+        "rekomendasi": "\n".join([f"➤ {item}" for item in rek_items])
     }
 
-    return info, kunlap_entries, narasi
-
-# ----------------- GENERATOR DOKUMEN PDF REPORTLAB -----------------
-def generate_pdf_report(info, entries, custom_data, tgl_cetak, jenjang_pilihan, ttd_bytes):
+# ----------------- GENERATOR PDF RESMI (PERSIS SEPTEMBER) -----------------
+def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=1.8 * cm,
-        rightMargin=1.8 * cm,
+        leftMargin=2.0 * cm,
+        rightMargin=2.0 * cm,
         topMargin=2.0 * cm,
         bottomMargin=2.0 * cm
     )
 
     styles = getSampleStyleSheet()
-    
     style_title = ParagraphStyle('DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER)
     style_heading = ParagraphStyle('SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=10, spaceAfter=4)
-    style_body = ParagraphStyle('BodyJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=13.5, alignment=TA_JUSTIFY, firstLineIndent=22, spaceAfter=6)
-    style_bullet = ParagraphStyle('BulletText', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=13, alignment=TA_JUSTIFY, leftIndent=14, firstLineIndent=-10, spaceAfter=3.5)
-    
-    style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11.5)
-    style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=11.5, alignment=TA_CENTER)
-    style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8.5, leading=11.5, alignment=TA_CENTER)
+    style_bullet = ParagraphStyle('BulletText', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=14, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-12, spaceAfter=6)
+    style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12)
+    style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12, alignment=TA_CENTER)
+    style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=TA_CENTER)
 
     elements = []
 
     jenjang_map = {
-        "PLD": ("PLD", "PENDAMPING LOKAL DESA"),
-        "PD": ("PD", "PENDAMPING DESA"),
-        "TAPM": ("TAPM", "TENAGA AHLI PEMBERDAYAAN MASYARAKAT")
+        "TAPM": ("TAPM", f"TAPM KABUPATEN {info['kabupaten'].upper()}"),
+        "PD": ("PD", f"PENDAMPING DESA KECAMATAN {info['kecamatan'].upper()}"),
+        "PLD": ("PLD", f"PENDAMPING LOKAL DESA KECAMATAN {info['kecamatan'].upper()}")
     }
-    posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("PLD", "PENDAMPING LOKAL DESA"))
+    posisi_val, subheader_val = jenjang_map.get(jenjang_pilihan, ("TAPM", f"TAPM KABUPATEN {info['kabupaten'].upper()}"))
 
-    # Judul Dokumen
+    # Judul Dokumen (Persis September)
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
-    elements.append(Paragraph(jabatan_val, style_title))
-    elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
+    elements.append(Paragraph(subheader_val, style_title))
+    elements.append(Paragraph(f"Bulan {safe_text(info['bulan_str'])}, Tahun {safe_text(info['tahun_str'])}", style_title))
     elements.append(Spacer(1, 10))
 
     # A. Identitas
     elements.append(Paragraph("A. Identitas", style_heading))
     kecamatan_tampil = "-" if jenjang_pilihan == "TAPM" else safe_text(info["kecamatan"])
-    
     id_data = [
         [Paragraph("NIK", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nik"]), style_cell)],
         [Paragraph("Nama Lengkap", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nama"]), style_cell)],
@@ -382,9 +348,9 @@ def generate_pdf_report(info, entries, custom_data, tgl_cetak, jenjang_pilihan, 
         [Paragraph("Kabupaten/Kota", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["kabupaten"]), style_cell)],
         [Paragraph("Provinsi", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["provinsi"]), style_cell)],
         [Paragraph("Posisi", style_cell), Paragraph(":", style_cell_center), Paragraph(posisi_val, style_cell)],
-        [Paragraph("Jabatan", style_cell), Paragraph(":", style_cell_center), Paragraph(jabatan_val, style_cell)],
+        [Paragraph("Jabatan", style_cell), Paragraph(":", style_cell_center), Paragraph(posisi_val, style_cell)],
     ]
-    t_id = Table(id_data, colWidths=[3.2 * cm, 0.4 * cm, 13.8 * cm])
+    t_id = Table(id_data, colWidths=[3.2 * cm, 0.4 * cm, 13.4 * cm])
     t_id.setStyle(TableStyle([
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ('BOTTOMPADDING', (0,0), (-1,-1), 1.5),
@@ -392,39 +358,30 @@ def generate_pdf_report(info, entries, custom_data, tgl_cetak, jenjang_pilihan, 
         ('LEFTPADDING', (0,0), (-1,-1), 0),
     ]))
     elements.append(t_id)
-    elements.append(Spacer(1, 6))
+    elements.append(Spacer(1, 8))
 
-    # B. Waktu Pelaksanaan Kunjungan Lapangan
+    # B. Matriks Kunjungan (Tabel 4 Kolom Rapi)
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
     t_data = [
-        [
-            Paragraph("Hari ke", style_cell_bold),
-            Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold),
-            Paragraph("Lokasi Kunjungan", style_cell_bold),
-            ""
-        ],
-        [
-            Paragraph("1", style_cell_center),
-            Paragraph("2", style_cell_center),
-            Paragraph("Kecamatan", style_cell_center),
-            Paragraph("Desa", style_cell_center)
-        ]
+        [Paragraph("Hari ke", style_cell_bold), Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold), Paragraph("Lokasi Kunjungan", style_cell_bold), ""],
+        [Paragraph("1", style_cell_center), Paragraph("2", style_cell_center), Paragraph("Kecamatan", style_cell_center), Paragraph("Desa", style_cell_center)]
     ]
 
     for idx, e in enumerate(entries):
+        desa_label = "" if e["desa"] == "-" else safe_text(e["desa"])
         t_data.append([
             Paragraph(f"Hari ke {idx + 1}", style_cell_center),
             Paragraph(safe_text(e["tanggal"]), style_cell_center),
             Paragraph(safe_text(e["kecamatan"]), style_cell_center),
-            Paragraph(safe_text(e["desa"]), style_cell_center)
+            Paragraph(desa_label, style_cell_center)
         ])
 
     t_data.append([
-        Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {safe_text(info['periode'])} : {len(entries)} Hari</b>", style_cell_bold),
+        Paragraph(f"<b>Total Hari Kunjungan Lapangan Bulan {safe_text(info['bulan_str'])} Tahun {safe_text(info['tahun_str'])} : {len(entries)} Hari</b>", style_cell_bold),
         "", "", ""
     ])
 
-    t_kunlap = Table(t_data, colWidths=[2.3 * cm, 3.4 * cm, 5.2 * cm, 6.5 * cm], repeatRows=2)
+    t_kunlap = Table(t_data, colWidths=[2.5 * cm, 3.5 * cm, 5.0 * cm, 6.0 * cm], repeatRows=2)
     t_kunlap.setStyle(TableStyle([
         ('SPAN', (2, 0), (3, 0)),
         ('SPAN', (0, -1), (3, -1)),
@@ -433,65 +390,45 @@ def generate_pdf_report(info, entries, custom_data, tgl_cetak, jenjang_pilihan, 
         ('GRID', (0, 0), (-1, -2), 0.5, colors.black),
         ('BOX', (0, 0), (-1, -2), 0.5, colors.black),
         ('BOX', (0, -1), (-1, -1), 0.5, colors.black),
-        ('TOPPADDING', (0, 0), (-1, -1), 2.2),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.2),
+        ('TOPPADDING', (0, 0), (-1, -1), 2.5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2.5),
     ]))
     elements.append(t_kunlap)
-    elements.append(Spacer(1, 8))
+    elements.append(Spacer(1, 10))
 
-    # C. Tujuan
-    elements.append(Paragraph("C. Tujuan Kunjungan Lapangan", style_heading))
-    for p in custom_data["tujuan"].split("\n\n"):
-        if p.strip():
-            elements.append(Paragraph(safe_text(p.strip()), style_body))
+    # C. Tujuan Kunjungan Lapangan
+    elements.append(Paragraph("C. Tujuan Kunjungan Lapangan :", style_heading))
+    for line in custom_text["tujuan"].split("\n"):
+        c_line = line.strip()
+        if c_line:
+            elements.append(Paragraph(safe_text(c_line), style_bullet))
+    elements.append(Spacer(1, 4))
 
-    # D. Matriks Capaian Hasil Kunjungan Lapangan
-    elements.append(Paragraph("D. Hasil Kunjungan Lapangan (Matriks Capaian)", style_heading))
-    
-    t_hasil_rows = [
-        [
-            Paragraph("No", style_cell_bold),
-            Paragraph("Waktu & Lokasi", style_cell_bold),
-            Paragraph("Fokus Agenda / Bidang Tugas", style_cell_bold),
-            Paragraph("Output / Capaian Lapangan", style_cell_bold)
-        ]
-    ]
+    # D. Hasil Kunjungan Lapangan (Gaya Tematik September)
+    elements.append(Paragraph("D. Hasil Kunjungan Lapangan :", style_heading))
+    for line in custom_text["hasil"].split("\n"):
+        c_line = line.strip()
+        if c_line:
+            elements.append(Paragraph(safe_text(c_line), style_bullet))
+    elements.append(Spacer(1, 4))
 
-    for row in custom_data["hasil_tabel"]:
-        t_hasil_rows.append([
-            Paragraph(safe_text(row["no"]), style_cell_center),
-            Paragraph(row["waktu_lokasi"], style_cell),
-            Paragraph(safe_text(row["bidang"]), style_cell),
-            Paragraph(safe_text(row["capaian"]), style_cell)
-        ])
-
-    t_hasil = Table(t_hasil_rows, colWidths=[1.0 * cm, 3.8 * cm, 4.4 * cm, 8.2 * cm], repeatRows=1)
-    t_hasil.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('TOPPADDING', (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-    ]))
-    elements.append(t_hasil)
-    elements.append(Spacer(1, 8))
-
-    # E. Tindak Lanjut
+    # E. Tindak Lanjut Penanganan Masalah
     elements.append(Paragraph("E. Langkah Tindak Lanjut Penanganan Masalah :", style_heading))
-    for line in custom_data["rtl"].split("\n"):
+    for line in custom_text["rtl"].split("\n"):
+        c_line = line.strip()
+        if c_line:
+            elements.append(Paragraph(safe_text(c_line), style_bullet))
+    elements.append(Spacer(1, 4))
+
+    # F. Rekomendasi
+    elements.append(Paragraph("F. Rekomendasi :", style_heading))
+    for line in custom_text["rekomendasi"].split("\n"):
         c_line = line.strip()
         if c_line:
             elements.append(Paragraph(safe_text(c_line), style_bullet))
 
-    # F. Rekomendasi
-    elements.append(Paragraph("F. Rekomendasi :", style_heading))
-    for line in custom_data["rekomendasi"].split("\n"):
-        c_line = line.strip().lstrip("-•* ")
-        if c_line:
-            elements.append(Paragraph(f"• {safe_text(c_line)}", style_bullet))
-
-    # Tanda Tangan
-    elements.append(Spacer(1, 12))
+    # Blok Tanda Tangan
+    elements.append(Spacer(1, 14))
     bln_indonesia = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     tgl_cetak_str = f"{safe_text(info['kabupaten']).title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
     
@@ -519,33 +456,36 @@ def generate_pdf_report(info, entries, custom_data, tgl_cetak, jenjang_pilihan, 
     buffer.seek(0)
     return buffer
 
-# ----------------- EKSEKUSI UI STREAMLIT -----------------
+# ----------------- LOGIKA ALUR WEB STREAMLIT -----------------
 if uploaded_pdf is not None:
     pdf_bytes = uploaded_pdf.getvalue()
-    
-    with st.spinner("Memproses data DRP secara instan..."):
-        info, entries, auto_data = parse_drp_pdf(pdf_bytes, jenjang_selected)
+    with st.spinner("Membaca berkas DRP..."):
+        info, entries, raw_kegiatan = parse_drp_pdf(pdf_bytes, jenjang_selected)
 
-    st.success(f"✅ Data DRP Terbaca: **{info['nama']}** | Jenjang: **{jenjang_selected}** | **{len(entries)} Hari Kunjungan**")
+    st.success(f"✅ Berkas DRP Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
 
-    st.markdown("##### 📝 Langkah 3: Pratinjau & Penyesuaian")
-    tab1, tab2, tab3 = st.tabs(["📋 Matriks Kunjungan", "📊 Matriks Hasil (Tabel D)", "✍️ Narasi Tujuan, RTL & Rekomendasi"])
+    # Generate narasi tematik instan begitu PDF terbaca (0.1 detik, tanpa AI lemot)
+    if "tematik_draft" not in st.session_state or st.session_state.get("file_aktif") != uploaded_pdf.name:
+        st.session_state["file_aktif"] = uploaded_pdf.name
+        st.session_state["tematik_draft"] = generate_laporan_tematik(raw_kegiatan, jenjang_selected, info)
+
+    draft = st.session_state["tematik_draft"]
+
+    st.markdown("##### 📝 Langkah 3: Pratinjau & Penyesuaian Narasi Laporan")
+    tab1, tab2 = st.tabs(["📋 Matriks Kunjungan (Tabel B)", "✍️ Narasi Resmi (Bagian C, D, E, F)"])
 
     with tab1:
         st.dataframe(entries, use_container_width=True)
 
     with tab2:
-        st.info("💡 Matriks Capaian Hasil Lapangan di bawah ini akan dirender langsung ke dalam Tabel Bagian D di dokumen PDF.")
-        st.dataframe(auto_data["hasil_tabel"], use_container_width=True)
+        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", draft.get("tujuan", ""), height=160)
+        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", draft.get("hasil", ""), height=180)
+        txt_rtl = st.text_area("E. Langkah Tindak Lanjut Penanganan Masalah", draft.get("rtl", ""), height=140)
+        txt_rek = st.text_area("F. Rekomendasi", draft.get("rekomendasi", ""), height=130)
 
-    with tab3:
-        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", auto_data["tujuan"], height=130)
-        txt_rtl = st.text_area("E. Langkah Tindak Lanjut Penanganan Masalah", auto_data["rtl"], height=120)
-        txt_rek = st.text_area("F. Rekomendasi", auto_data["rekomendasi"], height=120)
-
-    custom_report_data = {
+    custom_text = {
         "tujuan": txt_tujuan,
-        "hasil_tabel": auto_data["hasil_tabel"],
+        "hasil": txt_hasil,
         "rtl": txt_rtl,
         "rekomendasi": txt_rek
     }
@@ -554,11 +494,11 @@ if uploaded_pdf is not None:
     download_filename = f"KUNLAP_{jenjang_selected}_{info['bulan_str']}_{info['tahun_str']}.pdf"
 
     st.markdown("---")
-    if st.button("🚀 Buat Dokumen PDF KUNLAP", type="primary"):
-        with st.spinner("Menyusun PDF resmi A4..."):
+    if st.button("🚀 Cetak PDF KUNLAP Resmi (Standar September)", type="primary"):
+        with st.spinner("Menyusun PDF resmi..."):
             try:
                 pdf_output = generate_pdf_report(
-                    info, entries, custom_report_data, tgl_cetak, jenjang_selected, ttd_bytes
+                    info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
                 )
                 st.download_button(
                     label="📥 Unduh PDF Laporan KUNLAP",
