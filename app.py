@@ -114,139 +114,42 @@ def generate_narasi_ai(kegiatan_list, role, info):
 
     client = genai.Client(api_key=api_key)
     
-    kegiatan_teks = "\n".join([
-        f"- Tgl {k['tanggal']} ({k['kecamatan']}/{k['desa']}): {k['uraian'][:180]}" 
-        for k in kegiatan_list
-    ])
+    # OPTIMASI 1: Ambil hanya inti kegiatan (maksimal 90 karakter per hari) agar input sangat ringan
+    kegiatan_ringkas = []
+    for k in kegiatan_list:
+        # Ambil kalimat pertama saja
+        inti = k['uraian'].split('.')[0].strip()[:90]
+        kegiatan_ringkas.append(f"- {k['kecamatan']}/{k['desa']}: {inti}")
+    
+    kegiatan_teks = "\n".join(kegiatan_ringkas)
 
     prompt = f"""
-    Susun narasi resmi Laporan Kunjungan Lapangan Bulanan (KUNLAP) Kemendesa.
-    Jabatan: {role}
-    Wilayah: Kabupaten {info['kabupaten']}, Provinsi {info['provinsi']}. Periode: {info['periode']}.
+    Susun narasi resmi Laporan KUNLAP Kemendesa secara ringkas, padat, dan cepat.
+    Jabatan: {role} | Wilayah: Kab. {info['kabupaten']} | Periode: {info['periode']}
 
-    Catatan log kegiatan:
+    Daftar agenda singkat:
     {kegiatan_teks}
 
-    Aturan:
-    - Bahasa formal kedinasan (tanpa 'hari ini kami').
-    - TUJUAN: 1-2 paragraf padat.
-    - HASIL: Poin-poin capaian diawali strip (- ).
-    - TINDAK LANJUT: 3-4 poin nomor (1., 2., dst).
-    - REKOMENDASI: 3-4 poin diawali strip (- ).
-
-    Output WAJIB JSON:
+    Format WAJIB JSON valid (singkat & padat, langsung inti capaian):
     {{
-        "tujuan": "paragraf tujuan...",
-        "hasil": "- Capaian 1...\\n- Capaian 2...",
-        "rtl": "1. Langkah...\\n2. Langkah...",
-        "rekomendasi": "- Rekomendasi 1...\\n- Rekomendasi 2..."
+        "tujuan": "1 paragraf tujuan makro dan teknis.",
+        "hasil": "- Capaian 1\\n- Capaian 2\\n- Capaian 3",
+        "rtl": "1. Tindak lanjut 1\\n2. Tindak lanjut 2\\n3. Tindak lanjut 3",
+        "rekomendasi": "- Rekomendasi 1\\n- Rekomendasi 2\\n- Rekomendasi 3"
     }}
     """
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            err_msg = str(e)
-            if ("503" in err_msg or "UNAVAILABLE" in err_msg) and attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise e
-
-@st.cache_data(show_spinner=False)
-def parse_drp_pdf(pdf_bytes, selected_role):
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    full_text = "".join([page.extract_text() or "" for page in reader.pages])
-
-    def extract_field(pattern, text):
-        m = re.search(pattern, text, flags=re.IGNORECASE)
-        if m:
-            val = m.group(1).strip()
-            val = re.split(r"\n|Posisi|Jabatan|LOKASI|NIK|Provinsi|Kabupaten|Kecamatan|Desa", val)[0]
-            return clean_word(val)
-        return ""
-
-    nama_val = extract_field(r"Nama\s*:\s*([^\n\r]+)", full_text)
-    nik_val = extract_field(r"N\s*[I|1]\s*K\s*:\s*([0-9\s]+)", full_text).replace(" ", "")
-    kec_val = extract_field(r"Kecamatan\s*:\s*([^\n\r]+)", full_text)
-    kab_val = extract_field(r"Kabupaten(?:/Kota)?\s*:\s*([^\n\r]+)", full_text)
-    prov_val = extract_field(r"Provinsi\s*:\s*([^\n\r]+)", full_text)
-
-    kec_terpilih = "-" if selected_role == "TAPM" or not kec_val else kec_val
-
-    per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text, flags=re.IGNORECASE)
-    bln_txt = per_m.group(1).title() if per_m else "Oktober"
-    thn_txt = per_m.group(2) if per_m else "2026"
-
-    info = {
-        "nik": nik_val if nik_val else "-",
-        "nama": nama_val if nama_val else "Nama Tenaga Pendamping",
-        "kecamatan": kec_terpilih,
-        "kabupaten": kab_val if kab_val else "BOJONEGORO",
-        "provinsi": prov_val if prov_val else "JAWA TIMUR",
-        "bulan_str": bln_txt,
-        "tahun_str": thn_txt,
-        "periode": f"{bln_txt} Tahun {thn_txt}"
-    }
-
-    kunlap_section_match = re.search(
-        r"DAFTAR LAPORAN KUNJUNGAN LAPANGAN(.*?)(?:Total Laporan Kunjungan Lapangan|DATA CUTI|\Z)", 
-        full_text, 
-        re.DOTALL
+    # OPTIMASI 2: Pasang batas token agar AI tidak membuang waktu membuat teks berlebihan
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            max_output_tokens=800,  # <-- Membatasi panjang teks agar prosesnya super cepat
+            temperature=0.2         # Suhu rendah membuat respon lebih cepat dan konsisten
+        )
     )
-    kunlap_raw_text = kunlap_section_match.group(1) if kunlap_section_match else full_text
-
-    item_pattern = re.compile(
-        r"(?:(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+.*?)?Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)\s*Lokasi:\s*([^\n\r]+)(.*?)(?=(?:\d+\s+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|Deskripsi kegiatan:|\Z|DATA CUTI))",
-        re.DOTALL
-    )
-    
-    matches = item_pattern.findall(kunlap_raw_text)
-    kunlap_entries = []
-    kegiatan_lengkap = []
-
-    for idx, (tgl_raw, raw_loc, body) in enumerate(matches):
-        parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
-        if len(parts) >= 4:
-            row_kec = parts[2].title()
-            row_desa = parts[3].title()
-        elif len(parts) == 3:
-            row_kec = parts[2].title()
-            row_desa = "-"
-        else:
-            row_kec = info["kabupaten"].title()
-            row_desa = parts[-1].title() if parts else "-"
-
-        if tgl_raw:
-            tgl_clean = tgl_raw.replace("$", "").strip()
-            t_parts = re.split(r"[\/\-]", tgl_clean)
-            row_tgl = f"{int(t_parts[0])}-{t_parts[1].zfill(2)}-{'20'+t_parts[2] if len(t_parts[2])==2 else t_parts[2]}" if len(t_parts) == 3 else tgl_clean
-        else:
-            row_tgl = f"Kunjungan-{idx+1}"
-
-        kunlap_entries.append({
-            "tanggal": row_tgl,
-            "kecamatan": row_kec,
-            "desa": row_desa
-        })
-
-        body_clean = re.sub(r"\s+", " ", body).strip()
-        kegiatan_lengkap.append({
-            "tanggal": row_tgl,
-            "kecamatan": row_kec,
-            "desa": row_desa,
-            "uraian": body_clean
-        })
-
-    return info, kunlap_entries, kegiatan_lengkap
+    return json.loads(response.text)
 
 # ----------------- PEMBUATAN DOKUMEN PDF -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
