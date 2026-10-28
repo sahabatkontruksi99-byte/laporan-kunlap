@@ -202,8 +202,13 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             "desa": row_desa
         })
 
-        # Bersihkan body teks dari baris header aktivitas/judul
-        body_clean = re.sub(r"^(?:Koordinasi Pendampingan|Pembekalan \(IST\/OJT\)|Regulasi Tentang Desa|Peningkatan Kapasitas PD\/PLD)[\.\s]*", "", body.strip(), flags=re.IGNORECASE)
+       # Bersihkan pembuka bergaya catatan harian agar langsung masuk ke substansi hasil
+        body_clean = re.sub(
+            r"^(?:Koordinasi Pendampingan|Pembekalan \(IST\/OJT\)|Regulasi Tentang Desa|Peningkatan Kapasitas PD\/PLD)[\.\s]*", 
+            "", body.strip(), flags=re.IGNORECASE
+        )
+        # Hapus frasa pembuka waktu seperti "Hari ini...", "Pada hari Rabu...", dsb.
+        body_clean = re.sub(r"^(?:Hari ini[^\.]*?,\s*|Pada hari[^\.]*?,\s*)", "", body_clean, flags=re.IGNORECASE)
         body_clean = re.sub(r"\s+", " ", body_clean).strip()
         
         # Ambil kalimat penting pertama dan kedua untuk representasi substansi
