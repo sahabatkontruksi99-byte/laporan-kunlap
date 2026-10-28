@@ -4,6 +4,10 @@ import re
 import datetime
 import io
 import html
+import json
+import os
+from google import genai
+from google.genai import types
 
 # ReportLab untuk membuat PDF murni
 from reportlab.lib.pagesizes import A4
@@ -63,8 +67,8 @@ st.markdown("""
 
 st.markdown("""
 <div class="header-card">
-    <h2>📋 Generator Laporan KUNLAP</h2>
-    <p>Pilih jenjang, tanggal cetak, dan unggah berkas DRP untuk membuat dokumen PDF resmi siap cetak.</p>
+    <h2>📋 Generator Laporan KUNLAP (AI-Powered)</h2>
+    <p>Ekstraksi otomatis berkas DRP dengan perapian narasi dinas resmi berbasis Gemini AI.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -88,7 +92,7 @@ with col_up1:
 with col_up2:
     uploaded_ttd = st.file_uploader("Foto Tanda Tangan (Opsional: PNG/JPG)", type=["png", "jpg", "jpeg"])
 
-# ----------------- FUNGSI PARSER PDF -----------------
+# ----------------- FUNGSI PARSER & AI -----------------
 def clean_word(txt):
     if not txt:
         return ""
@@ -101,6 +105,55 @@ def safe_text(txt):
     if not txt:
         return ""
     return html.escape(str(txt).strip())
+
+def generate_narasi_ai(kegiatan_list, role, info):
+    # Mengambil key dari secrets Streamlit Cloud
+    api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
+    if not api_key:
+        raise ValueError("API Key belum disetel di Secrets Streamlit Cloud.")
+
+    client = genai.Client(api_key=api_key)
+    
+    kegiatan_teks = "\n".join([
+        f"- Kunjungan tgl {k['tanggal']} di {k['kecamatan']} ({k['desa']}): {k['uraian']}" 
+        for k in kegiatan_list
+    ])
+
+    prompt = f"""
+    Anda adalah seorang penyusun laporan resmi Tenaga Pendamping Profesional Kementerian Desa (Kemendesa).
+    Susun narasi resmi Laporan Kunjungan Lapangan Bulanan (KUNLAP) untuk jenjang jabatan: {role}.
+    Wilayah Penugasan: Kabupaten {info['kabupaten']}, Provinsi {info['provinsi']}.
+    Periode Pelaporan: {info['periode']}.
+
+    Berikut catatan log aktivitas riil kunjungan lapangan yang telah dilaksanakan:
+    ---
+    {kegiatan_teks}
+    ---
+
+    Instruksi Penulisan:
+    1. Gaya bahasa HARUS baku, formal kedinasan, padat, dan mengalir profesional. Hindari gaya buku harian seperti 'Hari ini kami...', 'Pada hari Rabu...', dsb.
+    2. Bagian TUJUAN: Buat 1 sampai 2 paragraf padat yang merangkum maksud pendampingan makro serta isu-isu teknis yang dikawal (stunting, eHDW, APBDes, BUMDes, monev DD).
+    3. Bagian HASIL: Buat dalam bentuk poin-poin tematik ringkas (gunakan tanda strip '- ' di awal tiap baris) yang merangkum capaian riil per bidang/desa, jangan ada kalimat terpotong.
+    4. Bagian TINDAK LANJUT: Buat 3-4 langkah aksi konkret berurutan (1., 2., dst).
+    5. Bagian REKOMENDASI: Buat 3-4 rekomendasi operasional menggunakan tanda strip '- ' di awal baris.
+
+    Output HARUS berupa JSON valid tanpa teks pengantar:
+    {{
+        "tujuan": "paragraf tujuan...",
+        "hasil": "- Capaian bidang 1...\\n- Capaian bidang 2...",
+        "rtl": "1. Langkah satu...\\n2. Langkah dua...",
+        "rekomendasi": "- Rekomendasi satu...\\n- Rekomendasi dua..."
+    }}
+    """
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json"
+        )
+    )
+    return json.loads(response.text)
 
 @st.cache_data(show_spinner=False)
 def parse_drp_pdf(pdf_bytes, selected_role):
@@ -125,11 +178,8 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     kab_val = extract_field(r"Kabupaten(?:/Kota)?\s*:\s*([^\n\r]+)", full_text)
     prov_val = extract_field(r"Provinsi\s*:\s*([^\n\r]+)", full_text)
 
-    # Identitas kecamatan: kosongkan jika jabatan TAPM atau memang tidak ada isinya di DRP
-    if selected_role == "TAPM" or not kec_val:
-        kec_terpilih = "-"
-    else:
-        kec_terpilih = kec_val
+    # Kosongkan kecamatan untuk jenjang TAPM
+    kec_terpilih = "-" if selected_role == "TAPM" or not kec_val else kec_val
 
     per_m = re.search(r"Periode:\s*([A-Za-z]+)\s*(\d{4})", full_text, flags=re.IGNORECASE)
     if per_m:
@@ -150,7 +200,6 @@ def parse_drp_pdf(pdf_bytes, selected_role):
         "periode": f"{bln_txt} Tahun {thn_txt}"
     }
 
-    # Ambil bagian tabel kunjungan lapangan secara spesifik
     kunlap_section_match = re.search(
         r"DAFTAR LAPORAN KUNJUNGAN LAPANGAN(.*?)(?:Total Laporan Kunjungan Lapangan|DATA CUTI|\Z)", 
         full_text, 
@@ -158,7 +207,6 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     )
     kunlap_raw_text = kunlap_section_match.group(1) if kunlap_section_match else full_text
 
-    # Ekstraksi setiap item kunjungan lapangan
     item_pattern = re.compile(
         r"(?:(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+.*?)?Deskripsi kegiatan:\s*\(Kunjungan Lapangan\)\s*Lokasi:\s*([^\n\r]+)(.*?)(?=(?:\d+\s+\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|Deskripsi kegiatan:|\Z|DATA CUTI))",
         re.DOTALL
@@ -166,13 +214,10 @@ def parse_drp_pdf(pdf_bytes, selected_role):
     
     matches = item_pattern.findall(kunlap_raw_text)
     kunlap_entries = []
-    uraian_kegiatan_list = []
+    kegiatan_lengkap = []
 
     for idx, (tgl_raw, raw_loc, body) in enumerate(matches):
-        # Bersihkan string lokasi
         parts = [clean_word(p) for p in raw_loc.split("/") if clean_word(p)]
-        
-        # Parsing dinamis: JAWA TIMUR / BOJONEGORO / KECAMATAN / DESA
         if len(parts) >= 4:
             row_kec = parts[2].title()
             row_desa = parts[3].title()
@@ -183,7 +228,6 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             row_kec = info["kabupaten"].title()
             row_desa = parts[-1].title() if parts else "-"
 
-        # Parsing tanggal
         if tgl_raw:
             tgl_clean = tgl_raw.replace("$", "").strip()
             t_parts = re.split(r"[\/\-]", tgl_clean)
@@ -193,8 +237,7 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             else:
                 row_tgl = tgl_clean
         else:
-            b_date = re.search(r"(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", body)
-            row_tgl = f"Kunjungan-{idx+1}" if not b_date else f"{b_date.group(1)}-{b_date.group(2)}-{b_date.group(3)}"
+            row_tgl = f"Kunjungan-{idx+1}"
 
         kunlap_entries.append({
             "tanggal": row_tgl,
@@ -202,81 +245,17 @@ def parse_drp_pdf(pdf_bytes, selected_role):
             "desa": row_desa
         })
 
-       # Bersihkan pembuka bergaya catatan harian agar langsung masuk ke substansi hasil
-        body_clean = re.sub(
-            r"^(?:Koordinasi Pendampingan|Pembekalan \(IST\/OJT\)|Regulasi Tentang Desa|Peningkatan Kapasitas PD\/PLD)[\.\s]*", 
-            "", body.strip(), flags=re.IGNORECASE
-        )
-        # Hapus frasa pembuka waktu seperti "Hari ini...", "Pada hari Rabu...", dsb.
-        body_clean = re.sub(r"^(?:Hari ini[^\.]*?,\s*|Pada hari[^\.]*?,\s*)", "", body_clean, flags=re.IGNORECASE)
-        body_clean = re.sub(r"\s+", " ", body_clean).strip()
-        
-        # Ambil kalimat penting pertama dan kedua untuk representasi substansi
-        sentences = [s.strip() for s in re.split(r'(?<!\d)\.(?!\d)\s*', body_clean) if len(s.strip()) > 20]
-        if sentences:
-            ringkasan_teks = ". ".join(sentences[:2]) + "."
-            lokasi_label = f"Kecamatan {row_kec}" if row_desa == "-" else f"Desa {row_desa} ({row_kec})"
-            uraian_kegiatan_list.append((lokasi_label, ringkasan_teks))
+        body_clean = re.sub(r"\s+", " ", body).strip()
+        kegiatan_lengkap.append({
+            "tanggal": row_tgl,
+            "kecamatan": row_kec,
+            "desa": row_desa,
+            "uraian": body_clean[:450]
+        })
 
-    total_hari = len(kunlap_entries)
-    wilayah_tugas = f"Kabupaten {info['kabupaten'].title()}" if selected_role == "TAPM" else f"Kecamatan {info['kecamatan'].title()}"
+    return info, kunlap_entries, kegiatan_lengkap
 
-    # Pembentukan Paragraf Substantif & Panjang untuk Tujuan
-    tujuan_p1 = (
-        f"Pelaksanaan kunjungan kerja dan pendampingan lapangan selama {total_hari} hari kerja pada periode {info['periode']} "
-        f"di wilayah penugasan {wilayah_tugas} diselenggarakan dalam rangka memperkuat kapasitas kelembagaan desa, "
-        f"meningkatkan akuntabilitas tata kelola keuangan, serta mendorong percepatan pelaksanaan program prioritas nasional "
-        f"dan daerah sesuai amanat regulasi Kementerian Desa, Pembangunan Daerah Tertinggal, dan Transmigrasi."
-    )
-    tujuan_p2 = (
-        f"Secara operasional, pendampingan ditujukan untuk memastikan konvergensi program penanganan kemiskinan dan penurunan stunting "
-        f"berbasis eHDW terakomodasi secara terukur dalam perencanaan desa (RKPDes dan APBDes), memfasilitasi legalitas serta kelembagaan "
-        f"BUM Desa guna menyambut kemitraan strategis pasokan pangan (MBG), serta melakukan pembinaan intensif dan verifikasi berjenjang "
-        f"terhadap penyaluran maupun pelaporan Dana Desa pada aplikasi Monev DD guna meminimalisasi risiko kendala administratif dan hukum di lapangan."
-    )
-    tujuan = f"{tujuan_p1}\n\n{tujuan_p2}"
-
-    # Pembentukan Paragraf Panjang untuk Hasil
-    hasil_list = []
-    for loc, act in uraian_kegiatan_list[:6]:
-        hasil_list.append(f"Pada agenda kerja di {loc}, pendampingan menghasilkan: {act}")
-
-    if hasil_list:
-        hasil_p1 = " ".join(hasil_list[:3])
-        hasil_p2 = " ".join(hasil_list[3:]) if len(hasil_list) > 3 else (
-            "Selain itu, seluruh evaluasi progres penyaluran Dana Desa tahap berjalan, pemutakhiran data eHDW, serta administrasi "
-            "pelaporan pertanggungjawaban telah terverifikasi secara berjenjang bersama jajaran pendamping dan perangkat desa setempat."
-        )
-        hasil = f"{hasil_p1}\n\n{hasil_p2}"
-    else:
-        hasil = (
-            "Terlaksananya fasilitasi koordinasi lintas sektoral, pendampingan penyusunan dokumen perencanaan desa, "
-            "asistensi penginputan pelaporan pada platform Monev DD, serta verifikasi kelengkapan pertanggungjawaban administratif di seluruh lokasi binaan secara akuntabel."
-        )
-
-    rtl = (
-        "1. Mendorong pemerintah desa dampingan untuk mempercepat penetapan regulasi desa terkait APBDes/P-APBDes dan menuntaskan SPJ kegiatan fisik maupun non-fisik secara tertib.\n"
-        "2. Mengawal pemutakhiran data secara berkelanjutan pada sistem aplikasi eHDW dan eHDW Learning bersama Kader Pembangunan Manusia (KPM) serta perangkat desa terkait.\n"
-        "3. Mengintensifkan asistensi percepatan penginputan serta perbaikan anomali data penyerapan Dana Desa pada sistem Monev DD guna memastikan kelancaran penyaluran alokasi tahap berikutnya.\n"
-        "4. Menindaklanjuti fasilitasi kelembagaan dan kelengkapan dokumen badan hukum BUM Desa guna mengoptimalkan peluang kemitraan usaha produktif di tingkat wilayah."
-    )
-
-    rekomendasi = (
-        "Pemerintah Desa agar segera menindaklanjuti hasil monitoring lapangan dengan menyelesaikan kelengkapan bukti administrasi SPJ serta realisasi kegiatan secara tepat waktu.\n"
-        "BPD dan Pemerintah Desa diharapkan memperkuat harmonisasi dalam pembahasan rancangan peraturan desa guna menjaga tertib regulasi dan akuntabilitas penatausahaan anggaran.\n"
-        "Kader desa (KPM dan operator) didorong untuk terus aktif memanfaatkan platform eHDW Learning guna peningkatan kapasitas data berbasis elektronik.\n"
-        "Tenaga Pendamping Profesional di seluruh tingkatan agar terus meningkatkan sinergi koordinasi dengan jajaran Forkopimcam dan dinas terkait guna kelancaran pembinaan desa."
-    )
-
-    narasi = {
-        "tujuan": tujuan,
-        "hasil": hasil,
-        "rtl": rtl,
-        "rekomendasi": rekomendasi
-    }
-    return info, kunlap_entries, narasi
-
-# ----------------- GENERATOR PDF REPORTLAB -----------------
+# ----------------- GENERATOR PDF RESMI -----------------
 def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, ttd_bytes):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -289,34 +268,10 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     )
 
     styles = getSampleStyleSheet()
-    
-    style_title = ParagraphStyle(
-        'DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER
-    )
-    style_heading = ParagraphStyle(
-        'SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=10, spaceAfter=4
-    )
-    style_body = ParagraphStyle(
-        'BodyJustifyIndent',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9.5,
-        leading=14.5,
-        alignment=TA_JUSTIFY,
-        firstLineIndent=28.35, # Indentasi alinea 1 cm
-        spaceAfter=7
-    )
-    style_bullet = ParagraphStyle(
-        'BulletJustify',
-        parent=styles['Normal'],
-        fontName='Helvetica',
-        fontSize=9.5,
-        leading=13.5,
-        alignment=TA_JUSTIFY,
-        leftIndent=15,
-        firstLineIndent=-10,
-        spaceAfter=4
-    )
+    style_title = ParagraphStyle('DocTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=11, leading=15, alignment=TA_CENTER)
+    style_heading = ParagraphStyle('SectionHeading', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, leading=14, spaceBefore=10, spaceAfter=4)
+    style_body = ParagraphStyle('BodyJustifyIndent', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=14.5, alignment=TA_JUSTIFY, firstLineIndent=28.35, spaceAfter=7)
+    style_bullet = ParagraphStyle('BulletJustify', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_JUSTIFY, leftIndent=15, firstLineIndent=-10, spaceAfter=4)
     style_cell = ParagraphStyle('TableCell', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12)
     style_cell_center = ParagraphStyle('TableCellCenter', parent=styles['Normal'], fontName='Helvetica', fontSize=9, leading=12, alignment=TA_CENTER)
     style_cell_bold = ParagraphStyle('TableCellBold', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, leading=12, alignment=TA_CENTER)
@@ -330,7 +285,7 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     }
     posisi_val, jabatan_val = jenjang_map.get(jenjang_pilihan, ("TAPM", "TENAGA AHLI PEMBERDAYAAN MASYARAKAT"))
 
-    # Judul Dokumen
+    # Judul
     elements.append(Paragraph("LAPORAN KUNJUNGAN LAPANGAN BULANAN", style_title))
     elements.append(Paragraph(jabatan_val, style_title))
     elements.append(Paragraph(f"Bulan {safe_text(info['periode'])}", style_title))
@@ -339,7 +294,6 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     # A. Identitas
     elements.append(Paragraph("A. Identitas", style_heading))
     kecamatan_tampil = "-" if jenjang_pilihan == "TAPM" else safe_text(info["kecamatan"])
-    
     id_data = [
         [Paragraph("NIK", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nik"]), style_cell)],
         [Paragraph("Nama Lengkap", style_cell), Paragraph(":", style_cell_center), Paragraph(safe_text(info["nama"]), style_cell)],
@@ -359,21 +313,11 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     elements.append(t_id)
     elements.append(Spacer(1, 6))
 
-    # B. Matriks Waktu Pelaksanaan
+    # B. Matriks Kunjungan
     elements.append(Paragraph("B. Waktu Pelaksanaan Kunjungan Lapangan", style_heading))
     t_data = [
-        [
-            Paragraph("Hari ke", style_cell_bold),
-            Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold),
-            Paragraph("Lokasi Kunjungan", style_cell_bold),
-            ""
-        ],
-        [
-            Paragraph("1", style_cell_center),
-            Paragraph("2", style_cell_center),
-            Paragraph("Kecamatan", style_cell_center),
-            Paragraph("Desa", style_cell_center)
-        ]
+        [Paragraph("Hari ke", style_cell_bold), Paragraph("Waktu<br/>(Tgl/Bln/Thn)", style_cell_bold), Paragraph("Lokasi Kunjungan", style_cell_bold), ""],
+        [Paragraph("1", style_cell_center), Paragraph("2", style_cell_center), Paragraph("Kecamatan", style_cell_center), Paragraph("Desa", style_cell_center)]
     ]
 
     for idx, e in enumerate(entries):
@@ -412,42 +356,41 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
 
     # D. Hasil
     elements.append(Paragraph("D. Hasil Kunjungan Lapangan", style_heading))
-    for p in custom_text["hasil"].split("\n\n"):
-        if p.strip():
-            elements.append(Paragraph(safe_text(p.strip()), style_body))
+    for line in custom_text["hasil"].split("\n"):
+        c_line = line.strip().lstrip("-•* ")
+        if c_line:
+            elements.append(Paragraph(f"• {safe_text(c_line)}", style_bullet))
 
     # E. Tindak Lanjut
     elements.append(Paragraph("E. Langkah Tindak Lanjut Penanganan Masalah :", style_heading))
-    for p in custom_text["rtl"].split("\n"):
-        if p.strip():
-            elements.append(Paragraph(safe_text(p.strip()), style_body))
+    for line in custom_text["rtl"].split("\n"):
+        c_line = line.strip()
+        if c_line:
+            elements.append(Paragraph(safe_text(c_line), style_bullet))
 
     # F. Rekomendasi
     elements.append(Paragraph("F. Rekomendasi :", style_heading))
-    for p in custom_text["rekomendasi"].split("\n"):
-        if p.strip():
-            elements.append(Paragraph(f"• {safe_text(p.strip())}", style_bullet))
+    for line in custom_text["rekomendasi"].split("\n"):
+        c_line = line.strip().lstrip("-•* ")
+        if c_line:
+            elements.append(Paragraph(f"• {safe_text(c_line)}", style_bullet))
 
     # Tanda Tangan
     elements.append(Spacer(1, 12))
-    sign_block = []
-    
-    bln_indonesia = [
-        "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-        "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-    ]
+    bln_indonesia = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
     tgl_cetak_str = f"{safe_text(info['kabupaten']).title()}, {tgl_cetak.day} {bln_indonesia[tgl_cetak.month]} {tgl_cetak.year}"
     
     style_sign = ParagraphStyle('SignRight', parent=styles['Normal'], fontName='Helvetica', fontSize=9.5, leading=13.5, alignment=TA_RIGHT)
     style_sign_name = ParagraphStyle('SignName', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9.5, leading=13.5, alignment=TA_RIGHT)
 
-    sign_block.append(Paragraph(tgl_cetak_str, style_sign))
-    sign_block.append(Paragraph("Penyusun Laporan,", style_sign))
+    sign_block = [
+        Paragraph(tgl_cetak_str, style_sign),
+        Paragraph("Penyusun Laporan,", style_sign)
+    ]
     
     if ttd_bytes is not None:
         sign_block.append(Spacer(1, 4))
-        img_io = io.BytesIO(ttd_bytes)
-        img = RLImage(img_io, width=4.0 * cm, height=2.0 * cm)
+        img = RLImage(io.BytesIO(ttd_bytes), width=4.0 * cm, height=2.0 * cm)
         img.hAlign = 'RIGHT'
         sign_block.append(img)
         sign_block.append(Spacer(1, 4))
@@ -461,13 +404,30 @@ def generate_pdf_report(info, entries, custom_text, tgl_cetak, jenjang_pilihan, 
     buffer.seek(0)
     return buffer
 
-# ----------------- LANGKAH 3: INTERAKSI UI -----------------
+# ----------------- EKSEKUSI UI -----------------
 if uploaded_pdf is not None:
     pdf_bytes = uploaded_pdf.getvalue()
-    with st.spinner("Membaca dan memproses laporan DRP..."):
-        info, entries, auto_narrative = parse_drp_pdf(pdf_bytes, jenjang_selected)
+    with st.spinner("Membaca berkas DRP..."):
+        info, entries, raw_kegiatan = parse_drp_pdf(pdf_bytes, jenjang_selected)
 
-    st.success(f"✅ Berhasil memproses data: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
+    st.success(f"✅ Data Terbaca: **{info['nama']}** | **{len(entries)} Hari Kunjungan**")
+
+    # Inisialisasi state untuk narasi agar tidak memanggil AI berulang kali
+    if "ai_narrative" not in st.session_state or st.session_state.get("last_uploaded") != uploaded_pdf.name:
+        with st.spinner("🤖 Gemini AI sedang menyusun narasi resmi laporan kedinasan..."):
+            try:
+                st.session_state["ai_narrative"] = generate_narasi_ai(raw_kegiatan, jenjang_selected, info)
+                st.session_state["last_uploaded"] = uploaded_pdf.name
+            except Exception as e:
+                st.error(f"Gagal memproses via AI: {e}. Menggunakan fallback.")
+                st.session_state["ai_narrative"] = {
+                    "tujuan": "Pelaksanaan kunjungan kerja dalam rangka fasilitasi dan pendampingan tata kelola desa.",
+                    "hasil": "- Terlaksananya monitoring realisasi program kerja desa.",
+                    "rtl": "1. Melakukan tindak lanjut evaluasi.",
+                    "rekomendasi": "- Pemerintah desa agar mempercepat penyusunan administrasi pertanggungjawaban."
+                }
+
+    narrative = st.session_state["ai_narrative"]
 
     st.markdown("##### 📝 Langkah 3: Pratinjau & Penyesuaian Narasi")
     tab1, tab2 = st.tabs(["📋 Matriks Kunjungan", "✍️ Narasi Laporan"])
@@ -476,10 +436,10 @@ if uploaded_pdf is not None:
         st.dataframe(entries, use_container_width=True)
 
     with tab2:
-        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", auto_narrative["tujuan"], height=160)
-        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", auto_narrative["hasil"], height=200)
-        txt_rtl = st.text_area("E. Langkah Tindak Lanjut", auto_narrative["rtl"], height=140)
-        txt_rek = st.text_area("F. Rekomendasi", auto_narrative["rekomendasi"], height=140)
+        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", narrative.get("tujuan", ""), height=150)
+        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", narrative.get("hasil", ""), height=200)
+        txt_rtl = st.text_area("E. Langkah Tindak Lanjut", narrative.get("rtl", ""), height=130)
+        txt_rek = st.text_area("F. Rekomendasi", narrative.get("rekomendasi", ""), height=130)
 
     custom_text = {
         "tujuan": txt_tujuan,
@@ -488,13 +448,12 @@ if uploaded_pdf is not None:
         "rekomendasi": txt_rek
     }
 
-    # Pembacaan aman buffer byte tanda tangan
     ttd_bytes = uploaded_ttd.getvalue() if uploaded_ttd is not None else None
     download_filename = f"KUNLAP_{jenjang_selected}_{info['bulan_str']}_{info['tahun_str']}.pdf"
 
     st.markdown("---")
     if st.button("🚀 Buat Dokumen PDF KUNLAP", type="primary"):
-        with st.spinner("Menyusun format PDF resmi..."):
+        with st.spinner("Menyusun PDF resmi..."):
             try:
                 pdf_output = generate_pdf_report(
                     info, entries, custom_text, tgl_cetak, jenjang_selected, ttd_bytes
@@ -507,4 +466,4 @@ if uploaded_pdf is not None:
                     use_container_width=True
                 )
             except Exception as e:
-                st.error(f"Terjadi kesalahan saat menyusun PDF: {e}")
+                st.error(f"Gagal menyusun PDF: {e}")
