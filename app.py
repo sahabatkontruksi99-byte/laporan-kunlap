@@ -65,7 +65,7 @@ st.markdown("""
 st.markdown("""
 <div class="header-card">
     <h2>📋 Generator Laporan KUNLAP Mandiri (Standar Permendes 3/2025)</h2>
-    <p>Ekstraksi otomatis DRP dengan logika kluster tematik instan dan bingkai border resmi.</p>
+    <p>Ekstraksi otomatis DRP dengan logika kluster tematik instan, narasi berbobot, dan bingkai border resmi.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -191,7 +191,7 @@ def parse_drp_pdf(pdf_bytes, selected_role):
 
     return info, kunlap_entries, kegiatan_lengkap
 
-# ----------------- MESIN KLUSTER TEMATIK (GAYA SEPTEMBER) -----------------
+# ----------------- MESIN KLUSTER TEMATIK LEBIH MENDALAM & BERBOBOT -----------------
 def generate_laporan_tematik(kegiatan_list, role, info):
     full_corpus = " ".join([k["uraian"].lower() for k in kegiatan_list])
     
@@ -199,7 +199,7 @@ def generate_laporan_tematik(kegiatan_list, role, info):
     kec_list = list(dict.fromkeys([k["kecamatan"] for k in kegiatan_list if k["kecamatan"] != "-"]))
     
     desa_sample = ", ".join(desa_list[:4]) if desa_list else "desa-desa dampingan"
-    kec_sample = ", ".join(kec_list[:3]) if kec_list else info["kabupaten"]
+    kec_sample = ", ".join(kec_list[:4]) if kec_list else info["kabupaten"]
 
     has_stunting = any(w in full_corpus for w in ["stunting", "ehdw", "kpm", "gizi"])
     has_bumdes = any(w in full_corpus for w in ["bumdes", "bum desa", "mbg", "makan bergizi"])
@@ -213,88 +213,190 @@ def generate_laporan_tematik(kegiatan_list, role, info):
     rek_items = []
 
     if role == "TAPM":
-        # C. TUJUAN TAPM
+        # C. TUJUAN TAPM (Lebih mendalam & berbobot)
         if has_keuangan:
-            tujuan_items.append(f"Melaksanakan koordinasi bersama Pemerintah Kecamatan dan Desa (seperti di {kec_sample}) guna memfasilitasi pencermatan realisasi APBDes TA 2026, evaluasi serapan anggaran, serta penyelesaian SilPA TA 2025.")
+            tujuan_items.append(
+                f"Melaksanakan koordinasi teknis bersama Pemerintah Kecamatan (Kasi PMD) dan jajaran Pemerintah Desa (antara lain di Kecamatan {kec_sample}) "
+                f"guna memfasilitasi penelaahan realisasi penyerapan APBDes TA 2026, evaluasi serapan Dana Desa tahap berjalan, penertiban administrasi pembukuan Siskeudes, "
+                f"serta penyusunan langkah percepatan penuntasan kegiatan fisik tertunda akibat sisa lebih perhitungan anggaran (SilPA) TA 2025."
+            )
         if has_regulasi or has_budaya:
-            tujuan_items.append(f"Memfasilitasi dan mengadvokasi regulasi penataan kelembagaan desa, pembentukan panitia pengisian BPD periode 2027-2035 di Kecamatan {kec_sample}, serta penggalian potensi lokal kearifan budaya desa.")
+            tujuan_items.append(
+                f"Memfasilitasi asistensi regulasi dan advokasi kebijakan terkait penataan kelembagaan desa, tahapan persiapan pembentukan panitia pengisian keanggotaan "
+                f"Badan Permusyawaratan Desa (BPD) periode 2027–2035 di wilayah {kec_sample}, serta pelaksanaan visitasi lapangan guna penggalian data kearifan lokal "
+                f"dan pelestarian nilai budaya masyarakat adat/komunitas lokal (Suku Samin Sedulur Sikep di Margomulyo) dalam rangka penyusunan Monografi Desa Budaya."
+            )
         if has_bumdes:
-            tujuan_items.append("Mendampingi pemetaan potensi dan kesiapan kelembagaan BUM Desa dan BUM Desa Bersama dalam mendukung Program Prioritas Nasional Makan Bergizi Gratis (MBG).")
+            tujuan_items.append(
+                "Mendampingi identifikasi potensi, penataan tata kelola operasional, dan validasi kelengkapan legalitas badan hukum BUM Desa / BUM Desa Bersama "
+                "se-Kabupaten Bojonegoro guna memastikan kesiapan kelembagaan ekonomi desa sebagai pemasok komoditas pangan lokal dalam mendukung Program Prioritas Nasional Makan Bergizi Gratis (MBG)."
+            )
         if has_stunting:
-            tujuan_items.append(f"Melakukan supervisi penganggaran konvergensi stunting pada penyusunan R-APBDes TA 2027 serta pemutakhiran data akun eHDW Learning bersama KPM di {desa_sample}.")
-        tujuan_items.append("Memberikan bimbingan teknis (OJT) dan supervisi berjenjang kepada Pendamping Desa (PD) dan PLD terkait optimalisasi pelaporan realisasi pemanfaatan Dana Desa pada aplikasi resmi Monev DD.")
+            tujuan_items.append(
+                f"Melakukan supervisi teknis penganggaran konvergensi pencegahan stunting pada tahapan penyusunan dokumen R-APBDes TA 2027, memastikan terpenuhinya alokasi mandatory spending, "
+                f"serta memfasilitasi pendampingan Kader Pembangunan Manusia (KPM) dalam pemutakhiran data capaian layanan bulanan melalui instrumen eHDW dan eHDW Learning di {desa_sample}."
+            )
+        tujuan_items.append(
+            f"Memberikan bimbingan teknis (On the Job Training/OJT), supervisi berjenjang, dan koordinasi berkala per zona wilayah kepada Pendamping Desa (PD) dan Pendamping Lokal Desa (PLD) "
+            f"terkait percepatan pelaporan realisasi Dana Desa pada aplikasi resmi Kementerian Desa (monevdd.kemendesa.go.id) serta penguatan kapasitas pelaksanaan tugas pokok pendampingan."
+        )
 
-        # D. HASIL TAPM
+        # D. HASIL TAPM (Komprehensif & terukur)
         if has_keuangan:
-            hasil_items.append(f"Terfasilitasinya evaluasi progres APBDes TA 2026 se-wilayah kecamatan dampingan dan terbangunnya komitmen percepatan kegiatan fisik tertunda SilPA 2025 pada desa dampingan ({desa_sample}).")
+            hasil_items.append(
+                f"Terfasilitasinya evaluasi komprehensif terhadap progres pelaksanaan dan penatausahaan APBDes TA 2026 se-wilayah kecamatan dampingan, serta terbangunnya komitmen bersama "
+                f"dengan kepala desa dan perangkat desa terkait percepatan penyelesaian pekerjaan fisik dan pertanggungjawaban administrasi sisa kegiatan SilPA TA 2025 pada desa-desa dampingan ({desa_sample})."
+            )
         if has_bumdes:
-            hasil_items.append("Terpetakannya kesiapan dan validasi data unit usaha BUM Desa se-Kabupaten Bojonegoro dalam mendukung rantai pasok penyediaan pangan Program Makan Bergizi Gratis (MBG).")
+            hasil_items.append(
+                "Terpetakannya profil, portofolio unit usaha, dan kesiapan rantai pasok kelembagaan BUM Desa di Kabupaten Bojonegoro, serta tersinkronisasinya data potensi produk pangan unggulan desa "
+                "dengan arahan Direktorat Jenderal PEID Kemendesa PDT guna mendukung pemenuhan bahan pangan bagi Satuan Pelayanan Pemenuhan Gizi (SPPG) pada Program Makan Bergizi Gratis (MBG)."
+            )
         if has_regulasi:
-            hasil_items.append(f"Tersosialisasikannya tahapan teknis pengisian keanggotaan BPD periode 2027-2035 di wilayah {kec_sample} serta terasistensinya regulasi penjaringan perangkat desa agar akuntabel dan tertib aturan.")
+            hasil_items.append(
+                f"Tersosialisasikannya tahapan pembentukan panitia pengisian keanggotaan BPD periode 2027–2035 secara tertib aturan di wilayah {kec_sample}, serta terasistensinya kepatuhan perundang-undangan "
+                f"dalam mekanisme seleksi penjaringan dan penyaringan perangkat desa guna menjaga integritas dan akuntabilitas tata kelola pemerintahan desa."
+            )
         if has_stunting:
-            hasil_items.append("Terfasilitasinya pemenuhan mandatory spending penanganan stunting pada draf R-APBDes 2027 serta tersinkronisasinya data laporan eHDW bersama KPM.")
-        hasil_items.append("Meningkatnya kapasitas manajerial TPP (PD/PLD) melalui forum rakor berkala serta terverifikasinya pemutakhiran data input serapan anggaran pada laman monevdd.kemendesa.go.id.")
+            hasil_items.append(
+                f"Terakomodasinya alokasi anggaran penanganan dan pencegahan stunting terintegrasi pada rancangan APBDes TA 2027 sesuai pedoman prioritas penggunaan Dana Desa, serta terverifikasinya pembaruan data scorecards "
+                f"layanan sasaran 1.000 Hari Pertama Kehidupan (HPK) pada aplikasi eHDW oleh KPM di desa dampingan."
+            )
+        hasil_items.append(
+            "Meningkatnya kapasitas profesional dan kesamaan persepsi kerja TPP (PD dan PLD) di zona dampingan melalui forum koordinasi rutin, serta terverifikasinya kelengkapan penginputan data serapan, capaian output, "
+            "dan bukti dukung kegiatan pemanfaatan Dana Desa 2026 secara akurat pada laman monevdd.kemendesa.go.id."
+        )
 
         # E. TINDAK LANJUT TAPM
-        rtl_items.append("Mengarahkan seluruh TPP (PD dan PLD) untuk mengawal percepatan penetapan Perdes Perubahan APBDes 2026 serta penyusunan R-APBDes 2027 tepat waktu.")
-        rtl_items.append("Mengintensifkan supervisi dan validasi data kelengkapan dokumen badan hukum BUM Desa dan kesiapan mitra ketahanan pangan MBG.")
-        rtl_items.append("Melakukan pengawalan berkala terhadap pemutakhiran data realisasi fisik dan penyerapan anggaran secara mandiri pada aplikasi Monev DD.")
+        rtl_items.append(
+            "Mengoordinasikan dan mengarahkan seluruh jajaran TPP (PD dan PLD) untuk mengawal percepatan penetapan Peraturan Desa tentang APBDes Perubahan TA 2026 dan penyusunan draf R-APBDes TA 2027 tepat waktu."
+        )
+        rtl_items.append(
+            "Mengintensifkan supervisi dan validasi berkas pendaftaran badan hukum BUM Desa pada portal resmi Kemendesa, serta memetakan kesiapan kemitraan operasional unit usaha pangan desa bersama dinas terkait."
+        )
+        rtl_items.append(
+            "Melaksanakan pendampingan klinis dan asistensi berkala kepada para pendamping lapangan guna memastikan seluruh transaksi penyerapan anggaran dan dokumentasi fisik terunggah secara tuntas pada aplikasi Monev DD."
+        )
+        rtl_items.append(
+            "Mengawal tindak lanjut rekomendasi visitasi penulisan Monografi Desa Budaya sebagai bagian dari dokumentasi pelestarian nilai kearifan lokal di wilayah Kabupaten Bojonegoro."
+        )
 
         # F. REKOMENDASI TAPM
-        rek_items.append("Bagi Pemerintah Desa diharapkan mempercepat penyelesaian administrasi SPJ kegiatan fisik 100% dan penatausahaan aset desa guna kelancaran penyusunan anggaran tahun berikutnya.")
-        rek_items.append("Bagi Tenaga Pendamping Profesional (PD/PLD) diimbau untuk terus meningkatkan intensitas koordinasi dengan Kasi PMD Kecamatan, memperkuat monitoring lapangan, serta aktif mengawal kepatuhan pelaporan digital desa.")
+        rek_items.append(
+            "Bagi Pemerintah Desa diharapkan senantiasa menjaga komitmen kepatuhan regulasi, mempercepat penyelesaian fisik dan administrasi SPJ kegiatan secara lengkap 100%, serta memfasilitasi optimalisasi peran kader desa (KPM dan kelembagaan masyarakat)."
+        )
+        rek_items.append(
+            "Bagi Tenaga Pendamping Profesional (PD dan PLD) diimbau untuk meningkatkan frekuensi pendampingan lapangan, proaktif membangun komunikasi koordinatif dengan Kasi PMD Kecamatan, serta rutin memperbarui pelaporan pada Sistem Informasi Desa (SID/DRP) secara tepat waktu."
+        )
+        rek_items.append(
+            "Bagi Dinas PMD dan Tim Pembina Tingkat Kabupaten disarankan untuk memperkuat fasilitasi verifikasi regulasi perdes dan mempercepat rekonsiliasi data serapan keuangan desa guna kelancaran penyaluran alokasi Dana Desa tahap selanjutnya."
+        )
 
     elif role == "PD":
         # C. TUJUAN PD
-        tujuan_items.append(f"Memfasilitasi percepatan penyusunan dan penetapan dokumen perencanaan dan penganggaran desa (RKPDes/APBDes) di wilayah Kecamatan {kec_sample}.")
+        tujuan_items.append(
+            f"Melaksanakan fasilitasi dan pendampingan terpadu kepada Pemerintah Desa di wilayah Kecamatan {kec_sample} dalam rangka percepatan penyusunan, pembahasan, "
+            f"dan penetapan dokumen perencanaan pembangunan desa (RKPDes) dan dokumen penganggaran (APBDes/P-APBDes) agar selaras dengan prioritas nasional dan regulasi daerah."
+        )
         if has_stunting:
-            tujuan_items.append("Mendampingi Kader Pembangunan Manusia (KPM) dalam pemutakhiran data stunting bulanan dan aktivasi instrumen eHDW di tingkat desa.")
+            tujuan_items.append(
+                "Mendampingi Kader Pembangunan Manusia (KPM) dalam proses pengumpulan data, pencatatan layanan ibu hamil dan baduta, pemutakhiran indikator pemantauan berkala, serta aktivasi pelaporan scorecard melalui aplikasi eHDW di tingkat desa."
+            )
         if has_bumdes:
-            tujuan_items.append("Mengoordinasikan pengembangan kelembagaan BUM Desa serta penguatan unit usaha bersama antar-desa.")
-        tujuan_items.append("Melakukan pendampingan pengadministrasian penyaluran Dana Desa serta mentoring teknis kepada Pendamping Lokal Desa (PLD).")
+            tujuan_items.append(
+                "Mengoordinasikan penguatan tata kelola kelembagaan, kelengkapan administrasi pembukuan, pendaftaran status badan hukum, serta penjajakan kerja sama usaha BUM Desa / BUM Desa Bersama antar-desa."
+            )
+        tujuan_items.append(
+            "Melakukan fasilitasi percepatan pemenuhan dokumen persyaratan pencairan Dana Desa, penelaahan laporan pertanggungjawaban (SPJ), serta memberikan mentoring teknis operasional pendampingan kepada Pendamping Lokal Desa (PLD)."
+        )
 
         # D. HASIL PD
-        hasil_items.append(f"Terfasilitasinya sinkronisasi dokumen R-APBDes dan pengadministrasian penatausahaan APBDes di desa-desa Kecamatan {kec_sample}.")
+        hasil_items.append(
+            f"Terfasilitasinya sinkronisasi dan evaluasi draf dokumen APBDes di desa-desa wilayah Kecamatan {kec_sample}, sehingga alokasi pembiayaan program prioritas desa dan penatausahaan administrasi Siskeudes dapat berjalan tertib dan tepat waktu."
+        )
         if has_stunting:
-            hasil_items.append("Tersusunnya laporan konvergensi stunting desa dan terverifikasinya data sasaran penerima manfaat pada sistem eHDW.")
+            hasil_items.append(
+                "Tersusunnya laporan konvergensi pencegahan stunting tingkat desa, terverifikasinya data sasaran penerima bantuan intervensi gizi, serta terinputnya laporan triwulan pemantauan pada server aplikasi eHDW."
+            )
         if has_bumdes:
-            hasil_items.append("Terverifikasinya profil usaha dan kelengkapan dokumen administrasi operasional BUM Desa.")
-        hasil_items.append("Terekapitulasi dan terlaporkannya progres serapan Dana Desa serta terselenggaranya pendampingan rutin PLD secara berkala.")
+            hasil_items.append(
+                "Terverifikasinya profil usaha dan kelengkapan dokumen pendirian/pendaftaran badan hukum BUM Desa, serta terpetakannya potensi kerja sama usaha produktif desa di wilayah kecamatan."
+            )
+        hasil_items.append(
+            "Terekapitulasi dan terverifikasinya progres penyaluran serta pemanfaatan Dana Desa di tingkat kecamatan, serta terlaksananya bimbingan dan pendampingan kerja rutin kepada PLD dalam menjalankan tugas fasilitasi desa."
+        )
 
         # E. RTL PD
-        rtl_items.append("Mengawal desa dampingan agar menuntaskan penetapan Perdes APBDes tepat waktu.")
-        rtl_items.append("Melakukan asistensi input pelaporan realisasi Dana Desa ke aplikasi Siskeudes dan Monev DD.")
-        rtl_items.append("Meningkatkan frekuensi mentoring pendampingan kepada PLD dan KPM di desa dampingan.")
+        rtl_items.append(
+            "Mengawal pemerintah desa binaan untuk menuntaskan evaluasi dan penetapan Perdes APBDes Perubahan serta mempercepat penyusunan rancangan APBDes tahun anggaran berikutnya."
+        )
+        rtl_items.append(
+            "Melakukan asistensi intensif kepada kaur keuangan dan operator desa dalam penginputan data penatausahaan pada Siskeudes dan sistem Monev DD."
+        )
+        rtl_items.append(
+            "Meningkatkan frekuensi mentoring tatap muka bersama PLD dan kelembagaan desa guna memitigasi kendala administrasi lapangan secara lebih dini."
+        )
 
         # F. REKOMENDASI PD
-        rek_items.append("Pemerintah Desa agar menjaga ketepatan waktu dalam siklus pelaporan keuangan dan penyelesaian administrasi pertanggungjawaban fisik.")
-        rek_items.append("PLD dan lembaga desa diharapkan memperkokoh koordinasi tripartit bersama pihak kecamatan guna memitigasi kendala lapangan secara dini.")
+        rek_items.append(
+            "Pemerintah Desa agar konsisten menjaga ketepatan waktu dalam siklus pelaporan keuangan, tertib melengkapi bukti fisik pertanggungjawaban (SPJ), dan memperkuat koordinasi internal bersama BPD."
+        )
+        rek_items.append(
+            "Pemerintah Kecamatan dan Tim Pendamping agar mempererat sinergi koordinatif dalam verifikasi dokumen kelayakan pencairan anggaran guna menjamin kelancaran realisasi program pembangunan di desa."
+        )
 
     else: # PLD
         # C. TUJUAN PLD
-        tujuan_items.append(f"Melakukan pendampingan langsung kepada Pemerintah Desa dan BPD di {desa_sample} dalam fasilitasi tata kelola pemerintahan dan perencanaan pembangunan lokal desa.")
+        tujuan_items.append(
+            f"Melaksanakan pendampingan intensif dan melekat kepada Pemerintah Desa, Badan Permusyawaratan Desa (BPD), dan unsur masyarakat di {desa_sample} "
+            f"dalam memfasilitasi tahapan musyawarah perencanaan desa, tertib administrasi pemerintahan desa, dan akuntabilitas pelaksanaan kegiatan pembangunan skala lokal desa."
+        )
         if has_stunting:
-            tujuan_items.append("Mendampingi KPM dan kader posyandu dalam pencatatan dan pelaporan data penanganan stunting melalui aplikasi eHDW.")
+            tujuan_items.append(
+                "Mendampingi Kader Pembangunan Manusia (KPM) dan kader posyandu dalam pemantauan 5 paket layanan konvergensi stunting, pencatatan kehadiran sasaran, dan penginputan data pengukuran berkala pada instrumen eHDW."
+            )
         if has_keuangan:
-            tujuan_items.append("Mendampingi kaur dan pelaksana kegiatan anggaran dalam tertib administrasi penatausahaan buku kas dan bukti SPJ fisik desa.")
-        tujuan_items.append("Mencatat dan melaporkan kegiatan pendampingan harian secara aktif ke dalam Sistem Informasi Desa (SID/DRP).")
+            tujuan_items.append(
+                "Mendampingi pelaksana kegiatan anggaran (PKA) dan bendahara/kaur keuangan desa dalam penyiapan kelengkapan berkas administrasi SPJ, buku kas pembantu, serta pelaporan fisik hasil pelaksanaan kegiatan."
+            )
+        tujuan_items.append(
+            "Mencatat seluruh rekam jejak aktivitas pendampingan, permasalahan lapangan, serta capaian hasil fasilitasi ke dalam aplikasi laporan harian Sistem Informasi Desa (SID/DRP) secara aktif dan mandiri."
+        )
 
         # D. HASIL PLD
-        hasil_items.append(f"Terfasilitasinya musyawarah desa, penyusunan draf perencanaan, dan tertib administrasi tata kelola pemerintahan di {desa_sample}.")
+        hasil_items.append(
+            f"Terfasilitasinya musyawarah desa, tersusunnya draf dokumen perencanaan desa partisipatif, serta terasistensinya ketertiban tata kelola administrasi pemerintahan desa di {desa_sample}."
+        )
         if has_stunting:
-            hasil_items.append("Terlaksananya pemutakhiran data pengukuran stunting dan terfasilitasinya koordinasi KPM bersama kader kesehatan desa.")
+            hasil_items.append(
+                "Terlaksananya pemutakhiran data pemantauan stunting bulanan, meningkatnya pemahaman KPM dalam pengoperasian aplikasi eHDW, serta tersinkronisasinya data balita stunting bersama tenaga kesehatan desa."
+            )
         if has_keuangan:
-            hasil_items.append("Tertibnya kelengkapan dokumen pencairan anggaran dan terasistensinya pelaporan realisasi kegiatan pembangunan skala lokal desa.")
-        hasil_items.append("Terinputnya seluruh catatan aktivitas dan pelaporan harian pada aplikasi DRP secara berkala.")
+            hasil_items.append(
+                "Tertibnya pemberkasan administrasi pencairan anggaran, tersusunnya dokumen pembukuan SPJ kegiatan pembangunan fisik, dan terverifikasinya kesesuaian progres capaian lapangan di desa dampingan."
+            )
+        hasil_items.append(
+            "Terlaporkannya seluruh rangkaian log aktivitas pendampingan desa secara rutin dan akuntabel pada aplikasi DRP Kemendesa sebagai bukti pemenuhan indikator kinerja harian."
+        )
 
         # E. RTL PLD
-        rtl_items.append("Mengawal tindak lanjut catatan evaluasi administrasi dan penyelesaian SPJ di desa dampingan.")
-        rtl_items.append("Mendampingi kader desa dalam pemutakhiran data SDGs Desa dan eHDW.")
-        rtl_items.append("Melakukan koordinasi intensif dengan Pendamping Desa (PD) terkait progres kegiatan lapangan.")
+        rtl_items.append(
+            "Mengawal pemenuhan catatan perbaikan berkas administrasi pertanggungjawaban keuangan dan kelengkapan dokumen pendukung kegiatan fisik di desa."
+        )
+        rtl_items.append(
+            "Mendampingi KPM dan kader desa dalam finalisasi pemutakhiran data SDGs Desa dan scorecard stunting triwulanan."
+        )
+        rtl_items.append(
+            "Melaporkan secara berkala progres pendampingan dan kendala krusial desa kepada Pendamping Desa (PD) di tingkat kecamatan."
+        )
 
         # F. REKOMENDASI PLD
-        rek_items.append("Pemerintah Desa agar konsisten mengedepankan prinsip transparansi dan pelibatan masyarakat dalam setiap tahapan pembangunan desa.")
-        rek_items.append("Kader desa dan pengurus kelembagaan desa agar aktif memperbarui data sasaran program kerja secara berkala.")
+        rek_items.append(
+            "Pemerintah Desa agar senantiasa mengedepankan prinsip transparansi publik, keterbukaan informasi anggaran, serta partisipasi aktif warga dalam setiap tahapan pengambilan keputusan di desa."
+        )
+        rek_items.append(
+            "Lembaga kemasyarakatan desa dan kader pemberdayaan diharapkan terus merawat keterpaduan koordinasi guna memastikan program pembangunan terlaksana tepat sasaran dan berkesinambungan."
+        )
 
     return {
         "tujuan": "\n".join([f"➤ {item}" for item in tujuan_items]),
@@ -494,10 +596,10 @@ if uploaded_pdf is not None:
         st.dataframe(entries, use_container_width=True)
 
     with tab2:
-        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", draft.get("tujuan", ""), height=160)
-        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", draft.get("hasil", ""), height=180)
-        txt_rtl = st.text_area("E. Langkah Tindak Lanjut Penanganan Masalah", draft.get("rtl", ""), height=140)
-        txt_rek = st.text_area("F. Rekomendasi", draft.get("rekomendasi", ""), height=130)
+        txt_tujuan = st.text_area("C. Tujuan Kunjungan Lapangan", draft.get("tujuan", ""), height=180)
+        txt_hasil = st.text_area("D. Hasil Kunjungan Lapangan", draft.get("hasil", ""), height=200)
+        txt_rtl = st.text_area("E. Langkah Tindak Lanjut Penanganan Masalah", draft.get("rtl", ""), height=150)
+        txt_rek = st.text_area("F. Rekomendasi", draft.get("rekomendasi", ""), height=140)
 
     custom_text = {
         "tujuan": txt_tujuan,
